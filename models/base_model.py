@@ -30,7 +30,7 @@ class BaseModel(tf.keras.Model):
         logger : logging object
     """
 
-    def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
         super(BaseModel, self).__init__()
         self.optimizer = optimizer
         self.loss_fn = loss_fn
@@ -38,6 +38,7 @@ class BaseModel(tf.keras.Model):
         self.logger = logger
         self.model_size = args.model_size
         self.z_dim = args.z_dim
+        self.train_size = train_size
         self.num_groups = num_groups
         self.seed = args.seed
         self._build_model()
@@ -136,6 +137,8 @@ class BaseModel(tf.keras.Model):
         with tf.GradientTape() as tape:
             pred = self.call(*inputs)
             loss = self.loss_fn(labels, pred)
+            # Only need to add KL loss once per epoch
+            loss += sum(self.losses) / self.train_size
         grads = tape.gradient(loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
         return loss
