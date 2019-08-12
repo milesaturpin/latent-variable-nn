@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 import tensorflow as tf
 from sklearn.utils import shuffle
 
-from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN
+from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN
 from models.lstm import NormalLSTM, LatentFactorLSTM, DoubleLatentLSTM
 from utils import set_logger
 
@@ -60,7 +60,7 @@ def parse_args():
             "double" : two latent vector on last layer and second to last\n\
         '),
         type=str,
-        choices=['none', 'factor','double', 'bias'])
+        choices=['none', 'factor','double', 'bias', 'lower', 'weights', 'weights-factor'])
     # TODO: try to make this more intuitive
     # nargs input format e.g. `--z-dim 10 20` this will be parsed as [10,20]
     parser.add_argument('--z-dim',
@@ -111,7 +111,7 @@ def make_experiment_directory(data_dir, dataset, testing):
                 model_weights.pickle
     """
     timestr = time.strftime("%Y-%m-%d_%H-%M-%S")
-    experiment_dir = os.path.join(data_dir, dataset, timestr)
+    experiment_dir = os.path.join('experiments', dataset, timestr)
     # To avoid cluttering experiment directory while testing scripts
     if testing:
         experiment_dir = os.path.join('experiments', 'tests', timestr)
@@ -215,16 +215,18 @@ def main():
         num_groups = (len(np.unique(gid_train)),)
         kwargs['num_groups'] = num_groups
 
-        if args.latent_config=='none':
-            model = NormalCNN(**kwargs)
-        elif args.latent_config=='factor':
-            model = LatentFactorCNN(**kwargs)
-        elif args.latent_config=='double':
-            model = DoubleLatentCNN(**kwargs)
-        elif args.latent_config=='bias':
-            model = LatentBiasCNN(**kwargs)
-        else:
-            raise ValueError('No matching latent variable configuration')
+        model_dict = {
+            'none' : NormalCNN,
+            'factor' : LatentFactorCNN,
+            'double' : DoubleLatentCNN,
+            'bias' : LatentBiasCNN,
+            'lower' : LowerLatentFactorCNN,
+            #'weights' : FullWeightsCNN,
+            #'weights-factor' : FactoredWeightsCNN
+        }
+
+        model = model_dict[args.latent_config](**kwargs)
+
     else:
         print('>>> Reading Shakespeare (not literally)...')
         train_data, test_data = read_shakespeare_data(
@@ -236,6 +238,7 @@ def main():
             len(np.unique(gid2_train)))
         kwargs['num_groups'] = num_groups
 
+        # TODO: update to dict structure
         if args.latent_config=='none':
             model = NormalLSTM(**kwargs)
         elif args.latent_config=='factor':
