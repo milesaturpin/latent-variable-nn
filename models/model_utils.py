@@ -8,16 +8,16 @@ tfd = tfp.distributions
 
 def latent_normal_vector(shape):
     """
-    Common initialization when adding a latent vector 
-    with a normal prior to a model. Build two trainable 
-    matrices of means and variances. Intended use case 
+    Common initialization when adding a latent vector
+    with a normal prior to a model. Build two trainable
+    matrices of means and variances. Intended use case
     is that shape is (num_groups, z_dim).
     """
 
     z_mu = tf.Variable(tfd.Normal(0,0.1).sample(shape))
     z_sigma = tf.Variable(tfd.Gamma(10,10).sample(shape))
     z_prior = tfd.MultivariateNormalDiag(
-        loc=np.zeros((shape[1]), dtype=np.float32), 
+        loc=np.zeros((shape[1]), dtype=np.float32),
         scale_diag=np.ones((shape[1]), dtype=np.float32))
     return z_mu, z_sigma, z_prior
 
