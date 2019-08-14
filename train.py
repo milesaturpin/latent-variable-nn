@@ -213,6 +213,8 @@ def main():
         gid_train = train_data[1]
         # num_groups should be provided as an array-like, even if only one elt
         num_groups = (len(np.unique(gid_train)),)
+        train_size = gid_train.shape[0]
+        kwargs['train_size'] = train_size
         kwargs['num_groups'] = num_groups
 
         model_dict = {

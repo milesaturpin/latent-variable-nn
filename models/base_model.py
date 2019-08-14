@@ -138,6 +138,8 @@ class BaseModel(tf.keras.Model):
             pred = self.call(*inputs)
             loss = self.loss_fn(labels, pred)
             # Only need to add KL loss once per epoch
+
+            # loss += sum(self.losses) / self.train_size / tf.cast(tf.shape(inputs[0])[0], tf.float32)
             loss += sum(self.losses) / self.train_size
         grads = tape.gradient(loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))

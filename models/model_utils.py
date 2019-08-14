@@ -15,7 +15,7 @@ def latent_normal_vector(shape):
     """
 
     z_mu = tf.Variable(tfd.Normal(0,0.1).sample(shape))
-    z_sigma = tf.Variable(tfd.Gamma(10,10).sample(shape))
+    z_sigma = tf.Variable(tfd.Normal(0,0.1).sample(shape))
     z_prior = tfd.MultivariateNormalDiag(
         loc=np.zeros((shape[1]), dtype=np.float32),
         scale_diag=np.ones((shape[1]), dtype=np.float32))

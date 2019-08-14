@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow.keras.layers import (
@@ -45,9 +46,9 @@ class NormalCNN(BaseModel):
     Normal CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
         super(NormalCNN, self).__init__(
-            optimizer, loss_fn, num_groups, args, experiment_dir, logger)
+            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -82,12 +83,12 @@ class LatentFactorCNN(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
         super(LatentFactorCNN, self).__init__(
-            optimizer, loss_fn, num_groups, args, experiment_dir, logger)
+            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
 
         # TODO: move to superclass
-        self.encoder_size = args.encoder_size
+        #self.encoder_size = args.encoder_size
 
     def _build_model(self):
         if self.model_size=='small':
@@ -146,7 +147,7 @@ class LatentFactorCNN(BaseModel):
 
         z_var_post = self.construct_variational_posterior(gid)
         kl_loss = tfd.kl_divergence(z_var_post, self.z_prior)
-        self.add_loss(lambda: kl_loss)
+        self.add_loss(lambda: tf.reduce_sum(kl_loss))
         z = z_var_post.sample()
 
         x = tf.concat([x, z], axis=-1)
@@ -158,9 +159,9 @@ class LowerLatentFactorCNN(LatentFactorCNN):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
         super(LowerLatentFactorCNN, self).__init__(
-            optimizer, loss_fn, num_groups, args, experiment_dir, logger)
+            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
 
     def call(self, x, gid):
         x = self.reshape(x)
@@ -172,7 +173,7 @@ class LowerLatentFactorCNN(LatentFactorCNN):
 
         z_var_post = self.construct_variational_posterior(gid)
         kl_loss = tfd.kl_divergence(z_var_post, self.z_prior)
-        self.add_loss(lambda: kl_loss)
+        self.add_loss(lambda: tf.reduce_sum(kl_loss))
         z = z_var_post.sample()
 
         x = tf.concat([x, z], axis=-1)
@@ -187,9 +188,9 @@ class DoubleLatentCNN(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
         super(DoubleLatentCNN, self).__init__(
-            optimizer, loss_fn, num_groups, args, experiment_dir, logger)
+            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -228,7 +229,7 @@ class DoubleLatentCNN(BaseModel):
             self.construct_variational_posterior(gid))
         kl_loss = tfd.kl_divergence(z_var_post, self.z_prior)
         kl_loss2 = tfd.kl_divergence(z2_var_post, self.z2_prior)
-        self.add_loss(lambda: kl_loss + kl_loss2)
+        self.add_loss(lambda: tf.reduce_sum(kl_loss) + tf.reduce_sum(kl_loss2))
 
         x = self.reshape(x)
         x = self.conv1(x)
@@ -254,9 +255,9 @@ class LatentBiasCNN(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
         super(LatentBiasCNN, self).__init__(
-            optimizer, loss_fn, num_groups, args, experiment_dir, logger)
+            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -278,8 +279,15 @@ class LatentBiasCNN(BaseModel):
 
     def _build_latent_space(self):
         # (num_groups, 62), (num_groups, 62), (62,)
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
-            shape=[self.num_groups[0], 62])
+        #self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        #    shape=[self.num_groups[0], 62])
+        shape=[self.num_groups[0], 62]
+        # Note the different initialization because directly modeling bias terms
+        self.z_mu = tf.Variable(tfd.Normal(0.1,0.1).sample(shape))
+        self.z_sigma = tf.Variable(tfd.Normal(0,0.01).sample(shape))
+        self.z_prior = tfd.MultivariateNormalDiag(
+            loc=np.zeros((shape[1]), dtype=np.float32),
+            scale_diag=np.ones((shape[1]), dtype=np.float32))
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
@@ -299,7 +307,7 @@ class LatentBiasCNN(BaseModel):
         bias_posterior = self.construct_variational_posterior(gid)
         z_bias = bias_posterior.sample()
         kl_loss = tfd.kl_divergence(bias_posterior, self.z_prior)
-        self.add_loss(lambda: kl_loss)
+        self.add_loss(lambda: tf.reduce_sum(kl_loss))
 
         x = self.out(x)
         return tf.nn.softmax(x + z_bias)
