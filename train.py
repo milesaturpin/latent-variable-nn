@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 import tensorflow as tf
 from sklearn.utils import shuffle
 
-from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN
+from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN
 from models.lstm import NormalLSTM, LatentFactorLSTM, DoubleLatentLSTM
 from utils import set_logger
 
@@ -60,7 +60,7 @@ def parse_args():
             "double" : two latent vector on last layer and second to last\n\
         '),
         type=str,
-        choices=['none', 'factor','double', 'bias', 'lower', 'weights', 'weights-factor'])
+        choices=['none', 'factor','double', 'bias', 'lower', 'weight', 'weight-factor'])
     # TODO: try to make this more intuitive
     # nargs input format e.g. `--z-dim 10 20` this will be parsed as [10,20]
     parser.add_argument('--z-dim',
@@ -192,7 +192,10 @@ def main():
     with open(os.path.join(experiment_dir, 'hyperparams.json'), 'w') as f:
         json.dump(vars(args), f, indent=4, sort_keys=True)
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
+    #optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
+    import tensorflow_addons as tfa
+    optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
+    #optimizer = tf.keras.optimizers.SGD(learning_rate=args.lr)
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
 
     kwargs = {
@@ -223,8 +226,8 @@ def main():
             'double' : DoubleLatentCNN,
             'bias' : LatentBiasCNN,
             'lower' : LowerLatentFactorCNN,
-            #'weights' : FullWeightsCNN,
-            #'weights-factor' : FactoredWeightsCNN
+            'weight' : LatentWeightCNN,
+            #'weight-factor' : FactoredWeightCNN
         }
 
         model = model_dict[args.latent_config](**kwargs)

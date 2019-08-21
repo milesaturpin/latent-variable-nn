@@ -135,11 +135,13 @@ class BaseModel(tf.keras.Model):
         """
         inputs, labels = batch[:-1], batch[-1]
         with tf.GradientTape() as tape:
-            pred = self.call(*inputs)
+            pred = self(*inputs)
             loss = self.loss_fn(labels, pred)
             # Only need to add KL loss once per epoch
 
-            # loss += sum(self.losses) / self.train_size / tf.cast(tf.shape(inputs[0])[0], tf.float32)
+            #loss += sum(self.losses) / self.train_size / tf.cast(tf.shape(inputs[0])[0], tf.float32)
+            #print(loss.numpy(), (sum(self.losses) / self.train_size).numpy() / 1e5 )
+            #print((sum(self.losses) / self.train_size))
             loss += sum(self.losses) / self.train_size
         grads = tape.gradient(loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
@@ -162,7 +164,7 @@ class BaseModel(tf.keras.Model):
         # tqdm prints nice progress bars
         for test_batch in tqdm(test_generator):
             inputs, labels = test_batch[:-1], test_batch[-1]
-            score = self.call(*inputs)
+            score = self(*inputs)
             scores.append(score)
         scores = np.concatenate(scores)
         preds = scores.argmax(axis=1)
