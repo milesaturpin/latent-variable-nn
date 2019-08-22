@@ -192,9 +192,16 @@ def main():
     with open(os.path.join(experiment_dir, 'hyperparams.json'), 'w') as f:
         json.dump(vars(args), f, indent=4, sort_keys=True)
 
+    initial_learning_rate = args.lr
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate,
+        decay_steps=100,
+        decay_rate=0.96,
+        staircase=True)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
     #optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
     import tensorflow_addons as tfa
-    optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
+    #optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
     #optimizer = tf.keras.optimizers.SGD(learning_rate=args.lr)
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
 
