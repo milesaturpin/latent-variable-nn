@@ -8,7 +8,7 @@ from tensorflow.keras.layers import (
 from models.base_model import BaseModel
 from models.model_utils import (
     latent_normal_vector, latent_vector_variational_posterior,
-    latent_normal_matrix, latent_matrix_variational_posterior,)
+    latent_normal_matrix, latent_matrix_variational_posterior, softplus_inverse)
 
 tfd = tfp.distributions
 tfpl = tfp.layers
@@ -347,7 +347,7 @@ class LatentBiasCNN(BaseModel):
         self.flatten = Flatten()
         self.layer1 = Dense(units=params[4], activation='relu')
         # Turn off built in bias, turn off softmax
-        self.out = Dense(62, use_bias=False)
+        self.out = Dense(62, use_bias=True)
 
     def _build_latent_space(self):
         # (num_groups, 62), (num_groups, 62), (62,)
@@ -357,15 +357,29 @@ class LatentBiasCNN(BaseModel):
         # Note the different initialization because directly modeling bias terms
         self.z_mu = tf.Variable(tfd.Normal(0.1,0.1).sample(shape))
         self.z_sigma = tf.Variable(tfd.Normal(0,0.01).sample(shape))
+
+        self.z0_mu = tf.Variable(tfd.Normal(0.1,0.1).sample(shape[1]))
+        self.z0_sigma = tf.Variable(tfd.Normal(0,0.01).sample(shape[1]))
+
         self.z_prior = tfd.MultivariateNormalDiag(
+            loc=self.z0_mu, scale_diag=self.z0_sigma)
+
+        self.z0_prior = tfd.MultivariateNormalDiag(
             loc=np.zeros((shape[1]), dtype=np.float32),
             scale_diag=np.ones((shape[1]), dtype=np.float32))
+
+        #self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        #    shape=[self.num_groups[0], 62])
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
         post1 = latent_vector_variational_posterior(
             self.z_mu, self.z_sigma, gid)
-        return post1
+
+        prior_post = tfd.MultivariateNormalDiag(
+            loc=self.z0_mu, scale_diag=tf.nn.softplus(self.z0_sigma + softplus_inverse(1.0)))
+
+        return post1, prior_post
 
     def call(self, x, gid):
         x = self.reshape(x)
@@ -376,10 +390,12 @@ class LatentBiasCNN(BaseModel):
         x = self.flatten(x)
         x = self.layer1(x)
 
-        bias_posterior = self.construct_variational_posterior(gid)
+        bias_posterior, prior_posterior = self.construct_variational_posterior(gid)
         z_bias = bias_posterior.sample()
-        kl_loss = tfd.kl_divergence(bias_posterior, self.z_prior)
-        self.add_loss(tf.reduce_sum(kl_loss))
+        #prior_post_sample = prior_posterior.sample()
+        kl_loss = tfd.kl_divergence(bias_posterior, prior_posterior)
+        kl_loss_prior = tfd.kl_divergence(prior_posterior, self.z0_prior)
+        self.add_loss(tf.reduce_sum(kl_loss) + tf.reduce_sum(kl_loss_prior))
 
         x = self.out(x)
         return tf.nn.softmax(x + z_bias)
