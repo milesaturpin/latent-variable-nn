@@ -533,3 +533,148 @@ class LatentWeightCNN(BaseModel):
         x = x + bias
         return tf.nn.softmax(x)
         #return self.out(x)
+
+
+
+
+
+
+
+class LatentWeightOnlyCNN(BaseModel):
+    """
+    Latent variable CNN for FEMNIST data.
+    """
+
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
+        super(LatentWeightOnlyCNN, self).__init__(
+            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+
+    def _build_model(self):
+        if self.model_size=='small':
+            params=[16, 3, 32, 3, 256]
+        if self.model_size=='large':
+            params=[32, 5, 64, 5, 2048]
+
+        self.reshape = Reshape((28,28,1), input_shape=(784,))
+        self.conv1 = Conv2D(filters=params[0], kernel_size=params[1],
+            padding='same', activation='relu')
+        self.pool1 = MaxPooling2D(2)
+        self.conv2 = Conv2D(filters=params[2], kernel_size=params[3],
+            padding='same', activation='relu')
+        self.pool2 = MaxPooling2D(2)
+        self.flatten = Flatten()
+        self.layer1 = Dense(units=params[4], activation='relu')
+
+        # # self.weight_factors = tf.Variable(tfd.Normal(0.,0.1).sample(10,256*62))
+        # self.weight1_factors = Dense(units=1568*params[4], use_bias=False)
+
+        # #self.bias = tf.Variable(tfd.Normal(0.2,0.1).sample(62))
+        # self.bias1_factors = Dense(units=params[4], use_bias=False)
+
+
+        # self.weight_factors = tf.Variable(tfd.Normal(0.,0.1).sample(10,256*62))
+        self.weight_factors = Dense(units=params[4]*62)
+
+        #self.bias = tf.Variable(tfd.Normal(0.2,0.1).sample(62))
+        #self.bias_factors = Dense(units=62)
+
+        #self.out = tfpl.DenseFlipout(62, activation='softmax')
+        self.out = Dense(62, activation='softmax')
+
+    # def _build_latent_space(self):
+    #     # (num_groups, last_layer_units, new_layer_units)
+    #     if self.model_size=='small':
+    #         shape = [self.num_groups[0], 256, 62]
+    #     if self.model_size=='large':
+    #         shape = [self.num_groups[0], 2048, 62]
+
+    #     self.z_mu, self.z_sigma, self.z_prior = latent_normal_matrix(
+    #         shape=shape)
+
+    # def construct_variational_posterior(self, gid):
+    #     # Samples are shape (batch_size, last_layer, new_layer)
+    #     post = latent_matrix_variational_posterior(
+    #         self.z_mu, self.z_sigma, gid)
+    #     return post
+
+    def _build_latent_space(self):
+        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+            shape=[self.num_groups[0], self.z_dim[0]])
+
+        # self.z3_mu, self.z3_sigma, self.z3_prior = latent_normal_vector(
+        #     shape=[self.num_groups[0], 4])
+
+        # self.z4_mu, self.z4_sigma, self.z4_prior = latent_normal_vector(
+        #     shape=[self.num_groups[0], 16])
+
+    def construct_variational_posterior(self, gid):
+        # samples are shape (batch_size, z_dim)
+        post1 = latent_vector_variational_posterior(
+            self.z_mu, self.z_sigma, gid)
+        # post3 = latent_vector_variational_posterior(
+        #     self.z3_mu, self.z3_sigma, gid)
+        # post4 = latent_vector_variational_posterior(
+        #     self.z4_mu, self.z4_sigma, gid)
+        return post1
+
+    def call(self, x, gid):
+        z_var_post = (
+          self.construct_variational_posterior(gid))
+        kl_loss = tfd.kl_divergence(z_var_post, self.z_prior)
+        self.add_loss(tf.reduce_sum(kl_loss))
+
+        # z = tf.gather(self.z_mu, gid)
+        # self.add_loss(-1*tf.reduce_sum(self.z_prior.log_prob(z)))
+
+        # z2 = tf.gather(self.z2_mu, gid)
+        # self.add_loss(-1*tf.reduce_sum(self.z2_prior.log_prob(z2)))
+
+        # z3 = tf.gather(self.z3_mu, gid)
+        # self.add_loss(-1*tf.reduce_sum(self.z3_prior.log_prob(z3)))
+
+        # z4 = tf.gather(self.z4_mu, gid)
+        # self.add_loss(-1*tf.reduce_sum(self.z4_prior.log_prob(z4)))
+
+
+
+        x = self.reshape(x)
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.pool2(x)
+        x = self.flatten(x)
+
+        x = self.layer1(x)
+        # weights = self.weight1_factors(z3)
+        # weights = Reshape((1568, 256))(weights)
+        # x = tf.expand_dims(x, axis=-1)
+        # x = tf.linalg.matmul(weights, x, transpose_a=True)
+        # x = tf.squeeze(x)
+
+        # bias = self.bias1_factors(z4)
+        # #x = x + self.bias
+        # x = x + bias
+        # x = tf.nn.relu(x)
+
+
+
+        z = z_var_post.sample()
+
+        #print(tf.reduce_mean(tf.math.abs(z)))
+
+        # # TODO: get rid of expand dims and squeeze
+        # x = tf.expand_dims(x, axis=-1)
+        # x = tf.linalg.matmul(z, x, transpose_a=True)
+        # x = tf.squeeze(x)
+
+        weights = self.weight_factors(z)
+        weights = Reshape((256, 62))(weights)
+        x = tf.expand_dims(x, axis=-1)
+        x = tf.linalg.matmul(weights, x, transpose_a=True)
+        x = tf.squeeze(x)
+
+        #bias = self.bias_factors(z2)
+        #x = x + self.bias
+        #x = x + bias
+        #return tf.nn.softmax(x)
+        return self.out(x)

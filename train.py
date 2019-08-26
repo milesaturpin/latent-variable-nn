@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 import tensorflow as tf
 from sklearn.utils import shuffle
 
-from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2
+from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN
 from models.lstm import NormalLSTM, LatentFactorLSTM, DoubleLatentLSTM
 from utils import set_logger
 
@@ -60,7 +60,7 @@ def parse_args():
             "double" : two latent vector on last layer and second to last\n\
         '),
         type=str,
-        choices=['none', 'factor','double', 'bias', 'lower', 'weight', 'weight-factor', 'factor2'])
+        choices=['none', 'factor','double', 'bias', 'lower', 'weight', 'weight-factor', 'factor2', 'weight-only'])
     # TODO: try to make this more intuitive
     # nargs input format e.g. `--z-dim 10 20` this will be parsed as [10,20]
     parser.add_argument('--z-dim',
@@ -195,7 +195,7 @@ def main():
     initial_learning_rate = args.lr
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate,
-        decay_steps=50,
+        decay_steps=100,
         decay_rate=0.96,
         staircase=True)
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
@@ -235,7 +235,8 @@ def main():
             'lower' : LowerLatentFactorCNN,
             'weight' : LatentWeightCNN,
             'factor2' : LatentFactorCNN2,
-            #'weight-factor' : FactoredWeightCNN
+            #'weight-factor' : FactoredWeightCNN,
+            'weight-only' : LatentWeightOnlyCNN,
         }
 
         model = model_dict[args.latent_config](**kwargs)
