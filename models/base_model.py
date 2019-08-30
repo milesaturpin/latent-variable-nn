@@ -89,9 +89,9 @@ class BaseModel(tf.keras.Model):
         #self.log_group_test_performance(test_data, epoch=0)
 
         # TODO: find less hacky way to build model, get summary
-        inputs, labels = train_data[:-1], train_data[-1]
+        inputs, _ = train_data[:-1], train_data[-1]
         inputs = [x[:5] for x in inputs]
-        outputs = self(*inputs)
+        _ = self(*inputs)
         # Try to print summary of param counts, won't work for some models
         try:
             self.summary(print_fn=self.logger.info)
@@ -127,7 +127,6 @@ class BaseModel(tf.keras.Model):
                 self.log_group_test_performance(test_data, epoch=epoch)
                 self.save_weights()
 
-
     def train_step(self, batch):
         """
         Idiomatic Tensorflow for making predictions and computing
@@ -138,7 +137,7 @@ class BaseModel(tf.keras.Model):
             pred = self(*inputs)
             loss = self.loss_fn(labels, pred)
             # Only need to add KL loss once per epoch
-            #print((sum(self.losses) / self.train_size))
+            #print( sum(self.losses) / self.train_size)
             loss += sum(self.losses) / self.train_size
         grads = tape.gradient(loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))

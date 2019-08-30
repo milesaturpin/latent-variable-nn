@@ -5,9 +5,11 @@ from tensorflow.keras.layers import (
     Dense, Dropout, Conv2D, MaxPooling2D, Reshape, Flatten)
 #from tensorflow_probability.layers import DenseVariational
 
+from tensorflow.keras.utils import to_categorical
+
 from models.base_model import BaseModel
 from models.model_utils import (
-    latent_normal_vector, latent_vector_variational_posterior,
+    init_mean_field_vectors, build_normal_variational_posterior,
     latent_normal_matrix, latent_matrix_variational_posterior, softplus_inverse)
 
 tfd = tfp.distributions
@@ -49,9 +51,8 @@ class NormalCNN(BaseModel):
     Normal CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(NormalCNN, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(NormalCNN, self).__init__(*args, **kwargs)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -81,14 +82,51 @@ class NormalCNN(BaseModel):
         return self.out(x)
 
 
+class OneHotCNN(BaseModel):
+    """
+    Normal CNN for FEMNIST data.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(OneHotCNN, self).__init__(*args, **kwargs)
+
+    def _build_model(self):
+        if self.model_size=='small':
+            params=[16, 3, 32, 3, 256]
+        if self.model_size=='large':
+            params=[32, 5, 64, 5, 2048]
+
+        self.reshape = Reshape((28,28,1), input_shape=(784,))
+        self.conv1 = Conv2D(filters=params[0], kernel_size=params[1],
+            padding='same', activation='relu')
+        self.pool1 = MaxPooling2D(2)
+        self.conv2 = Conv2D(filters=params[2], kernel_size=params[3],
+            padding='same', activation='relu')
+        self.pool2 = MaxPooling2D(2)
+        self.flatten = Flatten()
+        self.layer1 = Dense(units=params[4], activation='relu')
+        self.out = Dense(62, activation='softmax')
+
+    def call(self, x, gid):
+        x = self.reshape(x)
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.pool2(x)
+        x = self.flatten(x)
+        x = self.layer1(x)
+        x = np.concatenate([x,to_categorical(gid, num_classes=self.num_groups)])
+        return self.out(x)
+
+
+
 class LatentFactorCNN(BaseModel):
     """
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(LatentFactorCNN, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(LatentFactorCNN, self).__init__(*args, **kwargs)
 
         # TODO: move to superclass
         #self.encoder_size = args.encoder_size
@@ -112,7 +150,7 @@ class LatentFactorCNN(BaseModel):
 
     def _build_latent_space(self):
         # (num_groups, z_dim), (num_groups, z_dim), (z_dim,)
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[0]])
 
     # def _build_encoder(self):
@@ -134,7 +172,7 @@ class LatentFactorCNN(BaseModel):
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
         return post1
 
@@ -163,9 +201,8 @@ class LatentFactorCNN2(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(LatentFactorCNN2, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(LatentFactorCNN2, self).__init__(*args, **kwargs)
 
         # TODO: move to superclass
         #self.encoder_size = args.encoder_size
@@ -192,12 +229,12 @@ class LatentFactorCNN2(BaseModel):
 
     def _build_latent_space(self):
         # (num_groups, z_dim), (num_groups, z_dim), (z_dim,)
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[0]])
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
         return post1
 
@@ -231,9 +268,8 @@ class LowerLatentFactorCNN(LatentFactorCNN):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(LowerLatentFactorCNN, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(LowerLatentFactorCNN, self).__init__(*args, **kwargs)
 
     def call(self, x, gid):
         x = self.reshape(x)
@@ -260,9 +296,8 @@ class DoubleLatentCNN(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(DoubleLatentCNN, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(DoubleLatentCNN, self).__init__(*args, **kwargs)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -283,16 +318,16 @@ class DoubleLatentCNN(BaseModel):
 
     def _build_latent_space(self):
         # (num_groups, z_dim), (num_groups, z_dim), (z_dim,)
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[0]])
-        self.z2_mu, self.z2_sigma, self.z2_prior = latent_normal_vector(
+        self.z2_mu, self.z2_sigma, self.z2_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[1]])
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
-        post2 = latent_vector_variational_posterior(
+        post2 = build_normal_variational_posterior(
             self.z2_mu, self.z2_sigma, gid)
         return post1, post2
 
@@ -327,9 +362,8 @@ class LatentBiasCNN(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(LatentBiasCNN, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(LatentBiasCNN, self).__init__(*args, **kwargs)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -351,7 +385,7 @@ class LatentBiasCNN(BaseModel):
 
     def _build_latent_space(self):
         # (num_groups, 62), (num_groups, 62), (62,)
-        #self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        #self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
         #    shape=[self.num_groups[0], 62])
         shape=[self.num_groups[0], 62]
         # Note the different initialization because directly modeling bias terms
@@ -368,12 +402,12 @@ class LatentBiasCNN(BaseModel):
             loc=np.zeros((shape[1]), dtype=np.float32),
             scale_diag=np.ones((shape[1]), dtype=np.float32))
 
-        #self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        #self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
         #    shape=[self.num_groups[0], 62])
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
 
         prior_post = tfd.MultivariateNormalDiag(
@@ -409,9 +443,8 @@ class LatentWeightCNN(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(LatentWeightCNN, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(LatentWeightCNN, self).__init__(*args, **kwargs)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -462,27 +495,27 @@ class LatentWeightCNN(BaseModel):
     #     return post
 
     def _build_latent_space(self):
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[0]])
 
-        self.z2_mu, self.z2_sigma, self.z2_prior = latent_normal_vector(
+        self.z2_mu, self.z2_sigma, self.z2_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[1]])
 
-        # self.z3_mu, self.z3_sigma, self.z3_prior = latent_normal_vector(
+        # self.z3_mu, self.z3_sigma, self.z3_prior = init_mean_field_vectors(
         #     shape=[self.num_groups[0], 4])
 
-        # self.z4_mu, self.z4_sigma, self.z4_prior = latent_normal_vector(
+        # self.z4_mu, self.z4_sigma, self.z4_prior = init_mean_field_vectors(
         #     shape=[self.num_groups[0], 16])
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
-        post2 = latent_vector_variational_posterior(
+        post2 = build_normal_variational_posterior(
             self.z2_mu, self.z2_sigma, gid)
-        # post3 = latent_vector_variational_posterior(
+        # post3 = build_normal_variational_posterior(
         #     self.z3_mu, self.z3_sigma, gid)
-        # post4 = latent_vector_variational_posterior(
+        # post4 = build_normal_variational_posterior(
         #     self.z4_mu, self.z4_sigma, gid)
         return post1, post2
 
@@ -561,9 +594,8 @@ class LatentWeightOnlyCNN(BaseModel):
     Latent variable CNN for FEMNIST data.
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger):
-        super(LatentWeightOnlyCNN, self).__init__(
-            optimizer, loss_fn, train_size, num_groups, args, experiment_dir, logger)
+    def __init__(self, *args, **kwargs):
+        super(LatentWeightOnlyCNN, self).__init__(*args, **kwargs)
 
     def _build_model(self):
         if self.model_size=='small':
@@ -614,22 +646,22 @@ class LatentWeightOnlyCNN(BaseModel):
     #     return post
 
     def _build_latent_space(self):
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[0]])
 
-        # self.z3_mu, self.z3_sigma, self.z3_prior = latent_normal_vector(
+        # self.z3_mu, self.z3_sigma, self.z3_prior = init_mean_field_vectors(
         #     shape=[self.num_groups[0], 4])
 
-        # self.z4_mu, self.z4_sigma, self.z4_prior = latent_normal_vector(
+        # self.z4_mu, self.z4_sigma, self.z4_prior = init_mean_field_vectors(
         #     shape=[self.num_groups[0], 16])
 
     def construct_variational_posterior(self, gid):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
-        # post3 = latent_vector_variational_posterior(
+        # post3 = build_normal_variational_posterior(
         #     self.z3_mu, self.z3_sigma, gid)
-        # post4 = latent_vector_variational_posterior(
+        # post4 = build_normal_variational_posterior(
         #     self.z4_mu, self.z4_sigma, gid)
         return post1
 

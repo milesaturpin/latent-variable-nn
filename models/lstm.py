@@ -6,23 +6,23 @@ from tensorflow.keras.layers import (
 
 from models.base_model import BaseModel
 from models.model_utils import (
-    latent_normal_vector, latent_vector_variational_posterior)
+    init_mean_field_vectors, build_normal_variational_posterior)
 
 tfd = tfp.distributions
 
 
-# TODO: Add sampling 
+# TODO: Add sampling
 
 
 class NormalLSTM(BaseModel):
     """
-    Normal LSTM for Shakespeare data. 
+    Normal LSTM for Shakespeare data.
     """
-    
+
     def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
         super(NormalLSTM, self).__init__(
             optimizer, loss_fn, num_groups, args, experiment_dir, logger)
-        
+
     def _build_model(self):
         if self.model_size=='small':
             params=[64, 16, 16, 64]
@@ -37,21 +37,21 @@ class NormalLSTM(BaseModel):
 
     def call(self, x, gid, gid2):
         x = self.embedding(x)
-        x = self.lstm1(x) 
-        x = self.lstm2(x) 
+        x = self.lstm1(x)
+        x = self.lstm2(x)
         x = self.dense(x)
         return self.out(x)
 
 
 class LatentFactorLSTM(BaseModel):
     """
-    Latent variable LSTM for Shakespeare data. 
+    Latent variable LSTM for Shakespeare data.
     """
 
     def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
         super(LatentFactorLSTM, self).__init__(
             optimizer, loss_fn, num_groups, args, experiment_dir, logger)
-        
+
     def _build_model(self):
         if self.model_size=='small':
             params=[64, 16, 16, 64]
@@ -66,23 +66,23 @@ class LatentFactorLSTM(BaseModel):
 
     def _build_latent_space(self):
         # (num_groups, z_dim), (num_groups, z_dim), (z_dim,)
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[0]])
         # (num_groups2, z_dim2), (num_groups2, z_dim2), (z_dim2,)
-        self.z2_mu, self.z2_sigma, self.z2_prior = latent_normal_vector(
+        self.z2_mu, self.z2_sigma, self.z2_prior = init_mean_field_vectors(
             shape=[self.num_groups[1], self.z_dim[1]])
 
     def construct_variational_posterior(self, gid, gid2):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
-        post2 = latent_vector_variational_posterior(
+        post2 = build_normal_variational_posterior(
             self.z2_mu, self.z2_sigma, gid2)
         return post1, post2
 
     def call(self, x, gid, gid2):
         x = self.embedding(x)
-        x = self.lstm1(x) 
+        x = self.lstm1(x)
         x = self.lstm2(x)
         x = self.dense(x)
 
@@ -103,13 +103,13 @@ class LatentFactorLSTM(BaseModel):
 
 class DoubleLatentLSTM(BaseModel):
     """
-    Latent variable LSTM for Shakespeare data. 
+    Latent variable LSTM for Shakespeare data.
     """
 
     def __init__(self, optimizer, loss_fn, num_groups, args, experiment_dir, logger):
         super(DoubleLatentLSTM, self).__init__(
             optimizer, loss_fn, num_groups, args, experiment_dir, logger)
-        
+
     def _build_model(self):
         if self.model_size=='small':
             params=[64, 16, 16, 64]
@@ -128,24 +128,24 @@ class DoubleLatentLSTM(BaseModel):
         # z3: character group, second to last layer
         # z4: play group, second to last layer
         # (num_groups, z_dim), (num_groups, z_dim), (z_dim,)
-        self.z_mu, self.z_sigma, self.z_prior = latent_normal_vector(
+        self.z_mu, self.z_sigma, self.z_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[0]])
-        self.z2_mu, self.z2_sigma, self.z2_prior = latent_normal_vector(
+        self.z2_mu, self.z2_sigma, self.z2_prior = init_mean_field_vectors(
             shape=[self.num_groups[1], self.z_dim[1]])
-        self.z3_mu, self.z3_sigma, self.z3_prior = latent_normal_vector(
+        self.z3_mu, self.z3_sigma, self.z3_prior = init_mean_field_vectors(
             shape=[self.num_groups[0], self.z_dim[2]])
-        self.z4_mu, self.z4_sigma, self.z4_prior = latent_normal_vector(
+        self.z4_mu, self.z4_sigma, self.z4_prior = init_mean_field_vectors(
             shape=[self.num_groups[1], self.z_dim[3]])
 
     def construct_variational_posterior(self, gid, gid2):
         # samples are shape (batch_size, z_dim)
-        post1 = latent_vector_variational_posterior(
+        post1 = build_normal_variational_posterior(
             self.z_mu, self.z_sigma, gid)
-        post2 = latent_vector_variational_posterior(
+        post2 = build_normal_variational_posterior(
             self.z2_mu, self.z2_sigma, gid2)
-        post3 = latent_vector_variational_posterior(
+        post3 = build_normal_variational_posterior(
             self.z3_mu, self.z3_sigma, gid)
-        post4 = latent_vector_variational_posterior(
+        post4 = build_normal_variational_posterior(
             self.z4_mu, self.z4_sigma, gid2)
         return post1, post2, post3, post4
 
@@ -155,7 +155,7 @@ class DoubleLatentLSTM(BaseModel):
         array of values for group membership.
         """
         x = self.embedding(x)
-        x = self.lstm1(x) 
+        x = self.lstm1(x)
         x = self.lstm2(x)
 
         z_var_post, z2_var_post, z3_var_post, z4_var_post = (

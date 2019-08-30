@@ -7,7 +7,8 @@ from argparse import ArgumentParser
 import tensorflow as tf
 from sklearn.utils import shuffle
 
-from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN
+from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN, OneHotCNN
+from models.baselines import MLP, OneHotMLP, MultilevelMLP, FactoredMultilevelMLP
 from models.lstm import NormalLSTM, LatentFactorLSTM, DoubleLatentLSTM
 from utils import set_logger
 
@@ -28,6 +29,14 @@ def parse_args():
     parser.add_argument('--lr',
         type=float,
         default=0.004)
+    parser.add_argument('--lr-sched',
+        action='store_true')
+    parser.add_argument('--decay-steps',
+        type=int,
+        default=100)
+    parser.add_argument('--decay-rate',
+        type=float,
+        default=0.96)
     parser.add_argument('--batch-size',
         help='use larger epochs when using GPU e.g. 1000',
         type=int,
@@ -59,8 +68,7 @@ def parse_args():
             "factor" : append a latent vector to the layer before softmax\n\
             "double" : two latent vector on last layer and second to last\n\
         '),
-        type=str,
-        choices=['none', 'factor','double', 'bias', 'lower', 'weight', 'weight-factor', 'factor2', 'weight-only'])
+        type=str)
     # TODO: try to make this more intuitive
     # nargs input format e.g. `--z-dim 10 20` this will be parsed as [10,20]
     parser.add_argument('--z-dim',
@@ -192,13 +200,16 @@ def main():
     with open(os.path.join(experiment_dir, 'hyperparams.json'), 'w') as f:
         json.dump(vars(args), f, indent=4, sort_keys=True)
 
-    initial_learning_rate = args.lr
-    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate,
-        decay_steps=100,
-        decay_rate=0.96,
-        staircase=True)
-    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+    if args.lr_sched:
+        lr = tf.keras.optimizers.schedules.ExponentialDecay(
+            args.lr,
+            decay_steps=args.decay_steps,
+            decay_rate=args.decay_rate,
+            staircase=True)
+    else:
+        lr = args.lr
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     #optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
     import tensorflow_addons as tfa
     #optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
@@ -237,6 +248,8 @@ def main():
             'factor2' : LatentFactorCNN2,
             #'weight-factor' : FactoredWeightCNN,
             'weight-only' : LatentWeightOnlyCNN,
+            'mlp' : MLP, 'one-hot': OneHotMLP, 'ml-mlp': MultilevelMLP, 'fml-mlp':FactoredMultilevelMLP,
+            'one-hot-cnn' : OneHotCNN,
         }
 
         model = model_dict[args.latent_config](**kwargs)
