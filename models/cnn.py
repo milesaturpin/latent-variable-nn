@@ -114,8 +114,10 @@ class OneHotCNN(BaseModel):
         x = self.conv2(x)
         x = self.pool2(x)
         x = self.flatten(x)
+        x = np.concatenate([x,to_categorical(gid, num_classes=self.num_groups[0])], axis=1)
         x = self.layer1(x)
-        x = np.concatenate([x,to_categorical(gid, num_classes=self.num_groups)])
+        x = np.concatenate([x,to_categorical(gid, num_classes=self.num_groups[0])], axis=1)
+
         return self.out(x)
 
 

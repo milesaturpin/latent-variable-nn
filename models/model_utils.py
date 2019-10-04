@@ -48,6 +48,7 @@ def build_normal_variational_posterior(z_mu, z_sigma, gid):
     are of shape (num_samples, batch_size, z_dim).
     """
     # mu and sigma have shape (batch_size, z_dim)
+
     mu = tf.gather(z_mu, gid)
     sigma = tf.gather(z_sigma, gid)
     return tfd.MultivariateNormalDiag(
