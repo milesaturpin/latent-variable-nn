@@ -4,8 +4,9 @@ import tensorflow_probability as tfp
 import tensorflow as tf
 tfd = tfp.distributions
 
-# TODO: can probably collapse into 2 functions
 
+
+# TODO: can probably collapse into 2 functions
 def init_mean_field_vectors(shape, fixed_prior=True,
     mu_initializer='random_normal', sigma_initializer='random_normal'):
     """
