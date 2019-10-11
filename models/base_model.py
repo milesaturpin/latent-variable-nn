@@ -11,6 +11,8 @@ import tensorflow_probability as tfp
 
 from utils import robust_loss, round_nums
 
+import re
+
 tfd = tfp.distributions
 
 
@@ -35,6 +37,8 @@ class BaseModel(tf.keras.Model):
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.experiment_dir = experiment_dir
+        tb_file = os.path.join(experiment_dir, 'tensorboard')
+        self.train_summary_writer = tf.summary.create_file_writer(tb_file)
         self.logger = logger
         self.model_size = args.model_size
         self.z_dim = args.z_dim
@@ -44,6 +48,7 @@ class BaseModel(tf.keras.Model):
         self._build_model()
         if args.latent_config != 'none':
             self._build_latent_space()
+
 
     def _build_model(self):
         """Initialize model layers."""
@@ -98,8 +103,11 @@ class BaseModel(tf.keras.Model):
         except:
             self.logger.info('Configuration not amenable to `summary`.')
 
+
+
         # Stateful Keras object for keeping track of mean loss
         train_loss = tf.keras.metrics.Mean('train_loss')
+        mean_kl_loss = tf.keras.metrics.Mean('kl_loss')
 
         last_time = time.time()
         for epoch in range(1, num_epochs+1):
@@ -108,8 +116,9 @@ class BaseModel(tf.keras.Model):
             train_generator = self.create_batch_generator(train_data, batch_size)
 
             for step, batch in enumerate(train_generator):
-                loss = self.train_step(batch)
+                loss, kl_loss, grads = self.train_step(batch)
                 train_loss(loss)
+                mean_kl_loss(kl_loss)
 
                 # Print out train loss every 1/print_freq thru train set
                 num_batches = np.ceil(len(train_data[0])/batch_size)
@@ -119,13 +128,43 @@ class BaseModel(tf.keras.Model):
                             step+1, train_loss.result().numpy(),
                             round(time.time()-last_time)))
 
+                    with self.train_summary_writer.as_default():
+                        global_step = (epoch-1)*num_batches + step
+                        tf.summary.scalar('loss', train_loss.result(), step=global_step)
+                        tf.summary.scalar('kl_loss', mean_kl_loss.result(), step=global_step)
+
+                        names = [
+                            re.sub('my_latent_weight_cnn/', '', weight.name)
+                            for layer in self.layers
+                            for weight in layer.weights]
+                        weights = self.get_weights()
+
+                        for name, weight in zip(names, weights):
+                            tf.summary.histogram(name+'/weight', weight, step=global_step)
+
+                        for name, grad in zip(names, grads):
+                            tf.summary.histogram(name+'/grad', grad, step=global_step)
+
+                        # for i in range(3):
+                        #     tf.summary.scalar('dense/w_mu{}'.format(i), self.get_weights()[0][i,0,0], step=step)
+                        #     tf.summary.scalar('dense/w_sigma{}'.format(i), self.get_weights()[1][i,0,0], step=step)
+                        #     tf.summary.scalar('dense/b_mu{}'.format(i), self.get_weights()[4][i,0], step=step)
+                        #     tf.summary.scalar('dense/b_sigma{}'.format(i), self.get_weights()[5][i,0], step=step)
+                        # tf.summary.scalar('dense/w0_mu', self.get_weights()[2][0,0], step=step)
+                        # tf.summary.scalar('dense/w0_sigma', self.get_weights()[3][0,0], step=step)
+                        # tf.summary.scalar('dense/b0_mu', self.get_weights()[6][0], step=step)
+                        # tf.summary.scalar('dense/b0_sigma', self.get_weights()[7][0], step=step)
+
                     last_time = time.time()
                     train_loss.reset_states()
+                    mean_kl_loss.reset_states()
 
             if epoch % eval_every == 0 or epoch == num_epochs:
                 self.logger.info('Evaluating test set...')
                 self.log_group_test_performance(test_data, epoch=epoch)
                 self.save_weights()
+
+
 
     def train_step(self, batch):
         """
@@ -138,10 +177,11 @@ class BaseModel(tf.keras.Model):
             loss = self.loss_fn(labels, pred)
             # Only need to add KL loss once per epoch
             #print( sum(self.losses) / self.train_size)
-            loss += sum(self.losses) / self.train_size
-        grads = tape.gradient(loss, self.trainable_weights)
+            kl_loss = sum(self.losses) / self.train_size
+            total_loss = loss + kl_loss
+        grads = tape.gradient(total_loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
-        return loss
+        return loss, kl_loss, grads
 
 
     def log_group_test_performance(self, test_data, epoch):
@@ -188,14 +228,21 @@ class BaseModel(tf.keras.Model):
 
         results_arr = np.stack(results_list)
         group_acc = results_arr[:,0]
+        overall_acc = accuracy_score(y_test, preds)
         stats = round_nums(
-            accuracy_score(y_test, preds),
+            overall_acc,
             np.percentile(sorted(group_acc), 10),
             np.percentile(sorted(group_acc), 90))
 
         # TODO: add more metrics
         self.logger.info(
             'Test accuracy: {:.5f}, 10th percentile: {:.5f}, 90th percentile: {:.5f}'.format(*stats))
+
+        with self.train_summary_writer.as_default():
+            tf.summary.scalar('test_accuracy', overall_acc, step=epoch)
+            tf.summary.histogram('test_loss_group_dist', results_arr[:,2], step=epoch)
+            tf.summary.histogram('test_accuracy_group_dist', group_acc, step=epoch)
+            tf.summary.histogram('test_f1_group_dist', results_arr[:,1], step=epoch)
 
 
     # TODO: add more metrics, if add more need to add to CSV header
