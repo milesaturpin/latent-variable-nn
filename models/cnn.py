@@ -12,6 +12,8 @@ from models.model_utils import (
     init_mean_field_vectors, build_normal_variational_posterior,
     latent_normal_matrix, latent_matrix_variational_posterior, softplus_inverse)
 
+from models.multilevel_layers import MyMultilevelDense
+
 tfd = tfp.distributions
 tfpl = tfp.layers
 
@@ -586,6 +588,49 @@ class LatentWeightCNN(BaseModel):
         #return self.out(x)
 
 
+
+
+
+
+
+class MyLatentWeightCNN(BaseModel):
+    """
+    Latent variable CNN for FEMNIST data.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(MyLatentWeightCNN, self).__init__(*args, **kwargs)
+
+
+    def _build_model(self):
+        if self.model_size=='small':
+            params=[16, 3, 32, 3, 256]
+        if self.model_size=='large':
+            params=[32, 5, 64, 5, 2048]
+
+        self.reshape = Reshape((28,28,1), input_shape=(784,))
+        self.conv1 = Conv2D(filters=params[0], kernel_size=params[1],
+            padding='same', activation='relu')
+        self.pool1 = MaxPooling2D(2)
+        self.conv2 = Conv2D(filters=params[2], kernel_size=params[3],
+            padding='same', activation='relu')
+        self.pool2 = MaxPooling2D(2)
+        self.flatten = Flatten()
+        #self.layer1 = Dense(units=params[4], activation='relu')
+        self.layer1 = Dense(units=128, activation='relu')
+        self.ml_dense = MyMultilevelDense(units=62, num_groups=self.num_groups[0], activation='softmax')
+        #self.ml_dense = Dense(units=62, activation='softmax')
+
+    def call(self, x, gid):
+        x = self.reshape(x)
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.pool2(x)
+        x = self.flatten(x)
+        x = self.layer1(x)
+        x = self.ml_dense([x,gid])
+        return x
 
 
 

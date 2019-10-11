@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 import tensorflow as tf
 from sklearn.utils import shuffle
 
-from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN, OneHotCNN
+from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN, OneHotCNN, MyLatentWeightCNN
 from models.baselines import MLP, OneHotMLP, MultilevelMLP, FactoredMultilevelMLP
 from models.lstm import NormalLSTM, LatentFactorLSTM, DoubleLatentLSTM
 from utils import set_logger
@@ -211,7 +211,7 @@ def main():
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     #optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
-    import tensorflow_addons as tfa
+    #import tensorflow_addons as tfa
     #optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
     #optimizer = tf.keras.optimizers.SGD(learning_rate=args.lr)
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
@@ -250,6 +250,7 @@ def main():
             'weight-only' : LatentWeightOnlyCNN,
             'mlp' : MLP, 'one-hot': OneHotMLP, 'ml-mlp': MultilevelMLP, 'fml-mlp':FactoredMultilevelMLP,
             'one-hot-cnn' : OneHotCNN,
+            'my-ml-dense' : MyLatentWeightCNN,
         }
 
         model = model_dict[args.latent_config](**kwargs)
