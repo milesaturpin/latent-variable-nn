@@ -223,6 +223,264 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         return config
 
 
+
+class MAPMultilevelDense(tf.keras.layers.Layer):
+
+    def __init__(self, units, num_groups,
+                 multilevel_weights=True, multilevel_bias=True,
+                 activation=None,
+                 use_bias=True,
+                 regularization_strength=1,
+                 **kwargs):
+        super(MAPMultilevelDense, self).__init__(**kwargs)
+        #self._kl_divergence_fn = _make_kl_divergence_penalty(
+        #    kl_use_exact, weight=kl_weight)
+        self.units = int(units)
+        self.num_groups = num_groups
+        self.multilevel_weights = multilevel_weights
+        self.multilevel_bias = multilevel_bias
+        self.use_bias = use_bias
+        self.activation = tf.keras.activations.get(activation)
+        self.regularization_strength = regularization_strength
+        self.input_spec = [
+            tf.keras.layers.InputSpec(min_ndim=2),
+            tf.keras.layers.InputSpec(ndim=1)]
+
+
+    def build(self, input_shape):
+
+        x_input_shape, gid_input_shape = input_shape
+        last_dim = x_input_shape[-1]
+        self.input_spec = [
+            tf.keras.layers.InputSpec(min_ndim=2, axes={-1: last_dim}),
+            tf.keras.layers.InputSpec(ndim=1)]
+
+        # self.w_mu = self.add_weight(
+        #     shape=(self.num_groups, self.units, last_dim),
+        #     initializer='random_normal',
+        #     trainable=True,
+        #     name='kernel_mu')
+
+        # Wanted to use glorot normal but depends on shape so initialized first and then grouped together
+        # Had to use initializer instead of self.add_weight
+        create_weight_matrix = lambda : (
+            tf.initializers.glorot_normal()(shape=(self.units, last_dim)))
+        weight_matrix_list = [create_weight_matrix() for _ in range(self.num_groups)]
+
+        self.w_mu = tf.Variable(
+            np.stack(weight_matrix_list),
+            name='kernel_mu')
+
+
+        self.b_mu = self.add_weight(
+            shape=(self.num_groups, self.units),
+            initializer='random_normal',
+            trainable=True,
+            name='bias_mu')
+        # Adding this because was being weird when both this and prior 0
+        self.b_mu + 0.0001
+
+        self.w0_mu = self.add_weight(
+            shape=(self.units, last_dim),
+            initializer='glorot_normal',
+            trainable=True,
+            name='kernel_mu_prior')
+        self.w0_mu = tf.expand_dims(self.w0_mu, axis=0)
+
+        self.b0_mu = self.add_weight(
+            shape=(self.units,),
+            initializer='zeros',
+            trainable=True,
+            name='bias_mu_prior')
+        self.b0_mu = tf.expand_dims(self.b0_mu, axis=0)
+
+        super(MAPMultilevelDense, self).build(input_shape)
+
+    def call(self, inputs):
+        x, gid = inputs
+
+        batch_size, num_features = x.shape
+        assert len(x.shape) >= 2, "Data is incorrect shape!"
+        assert len(gid.shape) == 1, "gid should be flat vector!"
+
+        w = tf.gather(self.w_mu, gid)
+        b = tf.gather(self.b_mu, gid)
+
+        # B: batch size, p: num_features, u: num_units
+        einsum_matrix_mult = '{},Bp->Bu'.format(
+            'Bup' if self.multilevel_weights else 'up')
+        #x = tf.einsum(einsum_matrix_mult, w, x)
+        #print(w.shape, x.shape)
+        outputs = tf.einsum(einsum_matrix_mult, w, x)
+
+        target_shape = (batch_size, self.units)
+        msg = "output is shape {}, when should be shape {}".format(outputs.shape, target_shape)
+        assert outputs.shape == target_shape, msg
+        assert len(outputs.shape) == 2, "Output is wrong shape!"
+
+        if self.use_bias:
+            #outputs = tf.nn.bias_add(outputs, b)
+            outputs = outputs + b
+
+        if self.activation is not None:
+            outputs = self.activation(outputs)
+
+        # Regularize with "prior"
+
+        l2_prior_cost = lambda x, y, axes: (
+            tf.reduce_sum(tf.math.square(x - y), axis=axes))
+        w_loss = l2_prior_cost(w, self.w0_mu, axes=[1, 2])
+        b_loss = l2_prior_cost(b, self.b0_mu, axes=[1])
+        #print(w_loss, b_loss)
+        #print((tf.reduce_sum(w_loss) + tf.reduce_sum(b_loss)))
+        #print(self.regularization_strength
+        #    * (tf.reduce_sum(w_loss) + tf.reduce_sum(b_loss)))
+
+        self.add_loss(
+            self.regularization_strength
+            * (tf.reduce_sum(w_loss) + tf.reduce_sum(b_loss)))
+
+        return outputs
+
+    def get_config(self):
+        config = super(MAPMultilevelDense, self).get_config()
+        config.update({
+            'units': self.units,
+            'num_groups': self.num_groups,
+            'multilevel_weights' : self.multilevel_weights,
+            'multilevel_bias' : self.multilevel_bias,
+            'use_bias' : self.use_bias,
+            'activation' : self.activation,
+            'input_spec' : self.input_spec})
+        return config
+
+
+
+class MAPFactoredMultilevelDense(tf.keras.layers.Layer):
+
+    def __init__(self, units, num_groups,
+                 multilevel_weights=True, multilevel_bias=True,
+                 weights_latent_dim=None, bias_latent_dim=None,
+                 activation=None,
+                 use_bias=True,
+                 regularization_strength=1,
+                 **kwargs):
+        super(MAPFactoredMultilevelDense, self).__init__(**kwargs)
+        #self._kl_divergence_fn = _make_kl_divergence_penalty(
+        #    kl_use_exact, weight=kl_weight)
+        self.units = int(units)
+        self.num_groups = num_groups
+        self.multilevel_weights = multilevel_weights
+        self.multilevel_bias = multilevel_bias
+        self.use_bias = use_bias
+        self.weights_latent_dim = weights_latent_dim
+        self.bias_latent_dim = bias_latent_dim
+        self.activation = tf.keras.activations.get(activation)
+        self.regularization_strength = regularization_strength
+        self.input_spec = [
+            tf.keras.layers.InputSpec(min_ndim=2),
+            tf.keras.layers.InputSpec(ndim=1)]
+
+
+    def build(self, input_shape):
+
+        x_input_shape, gid_input_shape = input_shape
+        last_dim = x_input_shape[-1]
+        self.input_spec = [
+            tf.keras.layers.InputSpec(min_ndim=2, axes={-1: last_dim}),
+            tf.keras.layers.InputSpec(ndim=1)]
+
+
+
+        if self.multilevel_weights:
+            # Use latent dimension if provided, or else model full parameters
+            if self.weights_latent_dim is not None:
+                rv_dim = self.weights_latent_dim
+                self.weight_factors = Dense(last_dim * self.units, use_bias=False)
+            else:
+                rv_dim = last_dim * self.units
+
+            self.z_kernel = self.add_weight(
+                shape=(self.num_groups, rv_dim),
+                initializer='random_normal',
+                trainable=True,
+                name='z_kernel')
+            self.reshape_weights = Reshape((self.units, last_dim))
+        else:
+            #self.w = Dense(self.units)
+            self.w = self.add_weight(
+                shape=(self.units, last_dim),
+                initializer='random_normal',
+                trainable=True)
+
+        if self.multilevel_bias:
+            # Use latent dimension if provided, or else model full parameters
+            if self.bias_latent_dim is not None:
+                rv_dim = self.bias_latent_dim
+                self.bias_factors = Dense(self.units, use_bias=False)
+            else:
+                rv_dim = self.units
+
+            self.z_bias = self.add_weight(
+                shape=(self.num_groups, rv_dim),
+                initializer='random_normal',
+                trainable=True,
+                name='z_bias')
+
+        else:
+            self.b = self.add_weight(
+                shape=(self.units),
+                initializer='zeros',
+                trainable=True)
+
+    def call(self, inputs):
+        x, gid = inputs
+
+        batch_size, num_features = x.shape
+        assert len(x.shape) >= 2, "Data is incorrect shape!"
+        assert len(gid.shape) == 1, "gid should be flat vector!"
+
+        z_kernel = tf.gather(self.z_kernel, gid)
+        w = self.weight_factors(z_kernel)
+        w = self.reshape_weights(w)
+
+        z_bias = tf.gather(self.z_bias, gid)
+        b = self.bias_factors(z_bias)
+
+        # B: batch size, p: num_features, u: num_units
+        einsum_matrix_mult = '{},Bp->Bu'.format(
+            'Bup' if self.multilevel_weights else 'up')
+        #x = tf.einsum(einsum_matrix_mult, w, x)
+        #print(w.shape, x.shape)
+        outputs = tf.einsum(einsum_matrix_mult, w, x)
+
+        target_shape = (batch_size, self.units)
+        msg = "output is shape {}, when should be shape {}".format(outputs.shape, target_shape)
+        assert outputs.shape == target_shape, msg
+        assert len(outputs.shape) == 2, "Output is wrong shape!"
+
+        if self.use_bias:
+            #outputs = tf.nn.bias_add(outputs, b)
+            outputs = outputs + b
+
+        if self.activation is not None:
+            outputs = self.activation(outputs)
+
+        return outputs
+
+    def get_config(self):
+        config = super(MAPFactoredMultilevelDense, self).get_config()
+        config.update({
+            'units': self.units,
+            'num_groups': self.num_groups,
+            'multilevel_weights' : self.multilevel_weights,
+            'multilevel_bias' : self.multilevel_bias,
+            'use_bias' : self.use_bias,
+            'activation' : self.activation,
+            'input_spec' : self.input_spec})
+        return config
+
+
 class TFPDense(tf.keras.layers.Layer):
 
     def __init__(self, units, num_groups,

@@ -12,7 +12,7 @@ from models.model_utils import (
     init_mean_field_vectors, build_normal_variational_posterior,
     latent_normal_matrix, latent_matrix_variational_posterior, softplus_inverse)
 
-from models.multilevel_layers import MyMultilevelDense
+from models.multilevel_layers import MyMultilevelDense, MAPMultilevelDense, MAPFactoredMultilevelDense
 
 tfd = tfp.distributions
 tfpl = tfp.layers
@@ -82,6 +82,117 @@ class NormalCNN(BaseModel):
         x = self.flatten(x)
         x = self.layer1(x)
         return self.out(x)
+
+
+class MAPFullMultilevelCNN(BaseModel):
+    """
+    Normal CNN for FEMNIST data.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(MAPFullMultilevelCNN, self).__init__(*args, **kwargs)
+
+    def _build_model(self):
+        if self.model_size=='small':
+            params=[16, 3, 32, 3, 256]
+        if self.model_size=='large':
+            params=[32, 5, 64, 5, 2048]
+
+        self.reshape = Reshape((28,28,1), input_shape=(784,))
+        self.conv1 = Conv2D(filters=params[0], kernel_size=params[1],
+            padding='same', activation='relu')
+        self.pool1 = MaxPooling2D(2)
+        self.conv2 = Conv2D(filters=params[2], kernel_size=params[3],
+            padding='same', activation='relu')
+        self.pool2 = MaxPooling2D(2)
+        self.flatten = Flatten()
+        self.layer1 = Dense(units=params[4], activation='relu')
+
+        self.full_ml_dense = MAPMultilevelDense(
+            units=62, num_groups=self.num_groups[0],
+            multilevel_weights=True, multilevel_bias=True,
+            activation='softmax', use_bias=True)
+        # mu_init = tf.keras.initializers.get(mu_initializer)
+        # shape=[self.num_groups[0], self.z_dim[0]]
+        # self.zw =
+        # self.zb =
+        # self.out = Dense(62, activation='softmax')
+
+    def call(self, x, gid):
+        x = self.reshape(x)
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.pool2(x)
+        x = self.flatten(x)
+        x = self.layer1(x)
+
+        # weights = self.weight_factors(z)
+        # weights = Reshape((256, 62))(weights)
+        # x = tf.expand_dims(x, axis=-1)
+        # x = tf.linalg.matmul(weights, x, transpose_a=True)
+        # x = tf.squeeze(x)
+
+        # bias = self.bias_factors(z2)
+        # #x = x + self.bias
+        # x = x + bias
+        # return tf.nn.softmax(x)
+
+
+        # zw = tf.gather(self.zw, gid)
+        # w = Reshape((-1, self.units))(zw)
+
+        # # B: batch size, p: num_features, u: num_units
+        # einsum_matrix_mult = '{},Bp->Bu'.format(
+        #     'Bup' if self.multilevel_weights else 'up')
+        # #x = tf.einsum(einsum_matrix_mult, w, x)
+        # #print(w.shape, x.shape)
+        # outputs = tf.einsum(einsum_matrix_mult, w, x)
+
+        #return self.out(x)
+        return self.full_ml_dense([x,gid])
+
+
+class MAPFactoredMultilevelCNN(BaseModel):
+    """
+    Normal CNN for FEMNIST data.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(MAPFactoredMultilevelCNN, self).__init__(*args, **kwargs)
+
+    def _build_model(self):
+        if self.model_size=='small':
+            params=[16, 3, 32, 3, 256]
+        if self.model_size=='large':
+            params=[32, 5, 64, 5, 2048]
+
+        self.reshape = Reshape((28,28,1), input_shape=(784,))
+        self.conv1 = Conv2D(filters=params[0], kernel_size=params[1],
+            padding='same', activation='relu')
+        self.pool1 = MaxPooling2D(2)
+        self.conv2 = Conv2D(filters=params[2], kernel_size=params[3],
+            padding='same', activation='relu')
+        self.pool2 = MaxPooling2D(2)
+        self.flatten = Flatten()
+        self.layer1 = Dense(units=params[4], activation='relu')
+
+        self.factored_ml_dense = MAPFactoredMultilevelDense(
+            units=62, num_groups=self.num_groups[0],
+            multilevel_weights=True, multilevel_bias=True,
+            weights_latent_dim=self.z_dim[0], bias_latent_dim=self.z_dim[1],
+            activation='softmax', use_bias=True)
+
+    def call(self, x, gid):
+        x = self.reshape(x)
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.pool2(x)
+        x = self.flatten(x)
+        x = self.layer1(x)
+        return self.factored_ml_dense([x,gid])
+
 
 
 class OneHotCNN(BaseModel):

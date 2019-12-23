@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 import tensorflow as tf
 from sklearn.utils import shuffle
 
-from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN, OneHotCNN, MyLatentWeightCNN
+from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN, OneHotCNN, MyLatentWeightCNN, MAPFullMultilevelCNN, MAPFactoredMultilevelCNN
 from models.baselines import MLP, OneHotMLP, MultilevelMLP, FactoredMultilevelMLP
 from models.lstm import NormalLSTM, LatentFactorLSTM, DoubleLatentLSTM
 from utils import set_logger
@@ -251,6 +251,8 @@ def main():
             'mlp' : MLP, 'one-hot': OneHotMLP, 'ml-mlp': MultilevelMLP, 'fml-mlp':FactoredMultilevelMLP,
             'one-hot-cnn' : OneHotCNN,
             'my-ml-dense' : MyLatentWeightCNN,
+            'map-full' : MAPFullMultilevelCNN,
+            'map-factored' : MAPFactoredMultilevelCNN
         }
 
         model = model_dict[args.latent_config](**kwargs)
