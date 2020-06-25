@@ -102,6 +102,9 @@ class MyMultilevelDense(tf.keras.layers.Layer):
             tf.keras.layers.InputSpec(min_ndim=2, axes={-1: last_dim}),
             tf.keras.layers.InputSpec(ndim=1)]
 
+        # Initialization schemes
+        # Set priors on variances to be -5 since softplus(-5+c)=0.0008
+
         self.w_mu = self.add_weight(
             shape=(self.num_groups, self.units, last_dim),
             initializer='random_normal',
@@ -109,20 +112,28 @@ class MyMultilevelDense(tf.keras.layers.Layer):
             name='kernel_mu')
         self.w_sigma = self.add_weight(
             shape=(self.num_groups, self.units, last_dim),
-            initializer='random_normal',
+            initializer=tf.constant_initializer(-8),
+            #initializer=tf.constant_initializer(1e-4),
             trainable=True,
             name='kernel_sigma')
+
+        # Mean of the prior on the means of each entry of weight matrix
         self.w0_mu = self.add_weight(
             shape=(self.units, last_dim),
             initializer='random_normal',
             trainable=True,
             name='kernel_prior_mu')
+        # Variance on the prior over the means on the of each entry of weight matrix
         self.w0_sigma = self.add_weight(
             shape=(self.units, last_dim),
-            initializer='random_normal',
+            # Should be relatively diffuse, softplus(0+c)=1
+            initializer=tf.constant_initializer(0.),
+            #initializer=tf.constant_initializer(1e-4),
             #tf.constant_initializer(100.)
             trainable=True,
             name='kernel_prior_sigma')
+
+        # TODO: add prior for w_sigma
 
         self.b_mu = self.add_weight(
             shape=(self.num_groups, self.units),
@@ -131,19 +142,24 @@ class MyMultilevelDense(tf.keras.layers.Layer):
             name='bias_mu')
         self.b_sigma = self.add_weight(
             shape=(self.num_groups, self.units),
-            initializer='random_normal',
+            initializer=tf.constant_initializer(-8),
             trainable=True,
             name='bias_sigma')
+
+
         self.b0_mu = self.add_weight(
             shape=(self.units,),
             initializer='random_normal',
             trainable=True,
             name='bias_prior_mu')
+        # Variance on the prior over the means of biases
         self.b0_sigma = self.add_weight(
             shape=(self.units,),
-            initializer='random_normal',
+            initializer=tf.constant_initializer(0.),
             trainable=True,
             name='bias_prior_sigma')
+
+        # TODO: add prior for b_sigma
 
         super(MyMultilevelDense, self).build(input_shape)
 
@@ -182,9 +198,10 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         assert len(x.shape) >= 2, "Data is incorrect shape!"
         assert len(gid.shape) == 1, "gid should be flat vector!"
 
-        w_kl_loss = self.compute_kl(self.w_mu, self.w_sigma, self.w0_mu, self.w0_sigma, gid)
-        b_kl_loss = self.compute_kl(self.b_mu, self.b_sigma, self.b0_mu, self.b0_sigma, gid)
-        self.add_loss(tf.reduce_sum(w_kl_loss) + tf.reduce_sum(b_kl_loss))
+
+        #w_kl_loss = self.compute_kl(self.w_mu, self.w_sigma, self.w0_mu, self.w0_sigma, gid)
+        #b_kl_loss = self.compute_kl(self.b_mu, self.b_sigma, self.b0_mu, self.b0_sigma, gid)
+        #self.add_loss(tf.reduce_sum(w_kl_loss) + tf.reduce_sum(b_kl_loss))
 
         w = self.sample_posterior(self.w_mu, self.w_sigma, gid)
         b = self.sample_posterior(self.b_mu, self.b_sigma, gid)

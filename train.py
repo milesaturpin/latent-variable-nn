@@ -138,6 +138,7 @@ def read_femnist_data(data_dir, data_size, seed):
     decomposition into `inputs, labels = arr[:-1], arr[-1]`
     """
 
+
     data_dir = os.path.join(data_dir, 'femnist', data_size)
     load = lambda name: np.load(os.path.join(data_dir, name))
 
@@ -214,6 +215,8 @@ def main():
     #import tensorflow_addons as tfa
     #optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
     #optimizer = tf.keras.optimizers.SGD(learning_rate=args.lr)
+
+    # Tensorflow by default sums over losses
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
 
     kwargs = {

@@ -17,6 +17,8 @@ from models.multilevel_layers import MyMultilevelDense, MAPMultilevelDense, MAPF
 tfd = tfp.distributions
 tfpl = tfp.layers
 
+
+
 """
 # TODO: possibly merge with normal model call
 def call_sample_z(self, x, gid, num_samples=1, importance_weighted=True):
@@ -703,7 +705,7 @@ class LatentWeightCNN(BaseModel):
 
 
 
-
+# Last layer multilevel, use multilevel layers
 class MyLatentWeightCNN(BaseModel):
     """
     Latent variable CNN for FEMNIST data.
