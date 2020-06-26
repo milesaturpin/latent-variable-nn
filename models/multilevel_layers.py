@@ -14,6 +14,8 @@ from models.model_utils import (
 
 from tensorflow.keras.utils import to_categorical
 
+import ipdb
+
 tfd = tfp.distributions
 tfpl = tfp.layers
 
@@ -144,13 +146,13 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Variational parameters for tau_k, the group variance of the hierarchical prior
         # Mean of the variational posterior for group prior variance tau_k 
         self.w_tau_k_mu = self.add_weight(
-            shape=(self.units, last_dim),
+            shape=(self.num_groups, self.units, last_dim),
             initializer='random_normal',
             trainable=True,
             name='w_tau_k_mu')
         # Variance of the variational posterior for the group prior variance tau_k
         self.w_tau_k_sigma = self.add_weight(
-            shape=(self.units, last_dim),
+            shape=(self.num_groups, self.units, last_dim),
             # Should be relatively diffuse, softplus(0+c)=1
             initializer=tf.constant_initializer(1e-4),
             #tf.constant_initializer(100.)
@@ -235,13 +237,13 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Variational parameters for tau_k, the group variance of the hierarchical prior
         # Mean of the variational posterior for group prior variance tau_k 
         self.b_tau_k_mu = self.add_weight(
-            shape=(self.units,),
+            shape=(self.num_groups, self.units,),
             initializer='random_normal',
             trainable=True,
             name='b_tau_k_mu')
         # Variance of the variational posterior for the group prior variance tau_k
         self.b_tau_k_sigma = self.add_weight(
-            shape=(self.units,),
+            shape=(self.num_groups, self.units,),
             # Should be relatively diffuse, softplus(0+c)=1
             initializer=tf.constant_initializer(1e-4),
             #tf.constant_initializer(100.)
@@ -262,28 +264,17 @@ class MyMultilevelDense(tf.keras.layers.Layer):
 
         super(MyMultilevelDense, self).build(input_shape)
 
-    def sample_posterior(self, mu, sigma, gid):
-        mu = tf.gather(mu, gid)
-        sigma = tf.gather(sigma, gid)
+    def sample_posterior(self, mu, sigma):
         # By sampling after gather, I use different noise for each sample
         eps = np.random.randn(*mu.shape)
-        #print(eps.shape, mu.shape, sigma.shape)
-        c = np.log(np.expm1(1.))
-        sigma_plus = tf.nn.softplus(c + sigma)
-        samp = mu + sigma_plus*eps
+        samp = mu + sigma*eps
         return samp
 
 
-    def compute_kl(self, mu1, sigma1, mu2, sigma2, gid):
-        #print(mu1, gid)
-        mu1 = tf.gather(mu1, gid)
-        sigma1 = tf.gather(sigma1, gid)
-        c = np.log(np.expm1(1.))
-        sigma1_plus = tf.nn.softplus(c + sigma1)
-        sigma2_plus = tf.nn.softplus(c + sigma2)
+    def compute_kl(self, mu1, sigma1, mu2, sigma2):
         kl = (
-            tf.math.log(sigma2_plus/sigma1_plus)
-            + (sigma1_plus**2 + (mu1-mu2)**2)/(2*sigma2_plus**2)
+            tf.math.log(sigma2/sigma1)
+            + (sigma1**2 + (mu1-mu2)**2)/(2*sigma2**2)
             - 0.5)
 
         return kl
@@ -298,11 +289,96 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         assert len(x.shape) >= 2, "Data is incorrect shape!"
         assert len(gid.shape) == 1, "gid should be flat vector!"
 
-        w = self.sample_posterior(self.w_mu, self.w_sigma, gid)
-        b = self.sample_posterior(self.b_mu, self.b_sigma, gid)
+        # Get a softplussed version of the variances
+        c = np.log(np.expm1(1.))
+        w_sigma_k_sftpls = tf.nn.softplus(c + self.w_sigma_k)
+        b_sigma_k_sftpls = tf.nn.softplus(c + self.b_sigma_k)
+        w_sigma0_sftpls = tf.nn.softplus(c + self.w_sigma0)
+        b_sigma0_sftpls = tf.nn.softplus(c + self.b_sigma0)
+        w_tau_k_sigma_sftpls = tf.nn.softplus(c + self.w_tau_k_sigma)
+        b_tau_k_sigma_sftpls = tf.nn.softplus(c + self.b_tau_k_sigma)
 
-        z0_kl_loss = self.compute_kl(self.w0_mu, self.w0_sigma, self.z0_mean, self.z0_variance)
-        z0_kl_loss = self.compute_kl(self.w0_mu, self.w0_sigma, self.z0_mean, self.z0_variance)
+        gather = lambda x: tf.gather(x, gid)
+
+        w = self.sample_posterior(gather(self.w_mu_k), gather(w_sigma_k_sftpls))
+        b = self.sample_posterior(gather(self.b_mu_k), gather(b_sigma_k_sftpls))
+
+        w0 = self.sample_posterior(self.w_mu0, w_sigma0_sftpls)
+        b0 = self.sample_posterior(self.b_mu0, b_sigma0_sftpls)
+
+        w_tau_k = self.sample_posterior(gather(self.w_tau_k_mu), gather(w_tau_k_sigma_sftpls))
+        b_tau_k = self.sample_posterior(gather(self.b_tau_k_mu), gather(b_tau_k_sigma_sftpls))
+        
+        w_tau_k_sq = w_tau_k ** 2
+        b_tau_k_sq = b_tau_k ** 2
+        
+        # KL between var post on z0 and fixed prior over z0
+        w_z0_kl_loss = self.compute_kl(
+            self.w_mu0, w_sigma0_sftpls, self.w_z0_prior_mean, self.w_z0_prior_variance)
+        b_z0_kl_loss = self.compute_kl(
+            self.b_mu0, b_sigma0_sftpls, self.b_z0_prior_mean, self.b_z0_prior_variance)
+
+        # TODO: figure out scaling
+        # KL between var post on tau_k and fixed prior over tau_k
+        w_tau_k_kl_loss = self.compute_kl(
+            gather(self.w_tau_k_mu), gather(w_tau_k_sigma_sftpls),
+            self.w_tau_k_prior_mean, self.w_tau_k_prior_variance)
+        b_tau_k_kl_loss = self.compute_kl(
+            gather(self.b_tau_k_mu), gather(b_tau_k_sigma_sftpls), 
+            self.b_tau_k_prior_mean, self.b_tau_k_prior_variance)
+
+        # TODO: figure out scaling
+        # TODO: pick version
+        # Version 1: taking the KL between q(z_k) and p(z_k), have to sample 
+        # the parameters of p(z_k|z_0, tau_k) from q(z_0, tau_k)
+        w_z_k_kl_loss = self.compute_kl(gather(self.w_mu_k), gather(w_sigma_k_sftpls), w0, w_tau_k_sq)
+        b_z_k_kl_loss = self.compute_kl(gather(self.b_mu_k), gather(b_sigma_k_sftpls), b0, b_tau_k_sq)
+
+        # Version 2: take the expected log prob of z_k wrt q.
+        #   Version 2a: do just a monte carlo estimate
+        w_z_k_log_prob = tfd.Normal(w0, w_tau_k_sq).log_prob(w)
+        b_z_k_log_prob = tfd.Normal(b0, b_tau_k_sq).log_prob(b)
+        #   Version 2b: do mix of closed form and monte carlo
+
+        # D = self.w_mu_k.shape[1] * self.w_mu_k.shape[2]
+        # w_z_k_log_prob = (
+        #     -1/2 * D * np.log(2*np.pi) 
+        #     - 1/2 * D * tf.math.log(w_tau_k_sq)
+        #     - 1/2/w_tau_k_sq * (
+        #         tf.reduce_sum(self.w_sigma_k, axis=[-1,-2]) 
+        #         + tf.reduce_sum(self.w_sigma0, axis=[-1,-2]) 
+        #         + tf.einsum('Bd, Bd -> B', self.w_mu_k, self.w_mu_k)
+        #         + tf.einsum('Bd, Bd -> B', self.w_mu0, self.w_mu0)
+        #         - 2 * tf.einsum('Bd, Bd -> B', self.w_mu_k, self.w_mu0)))
+
+        # b_z_k_log_prob = (
+        #     -1/2 * D * np.log(2*np.pi) 
+        #     - 1/2 * D * tf.math.log(b_tau_k_sq)
+        #     - 1/2/b_tau_k_sq * (
+        #         tf.reduce_sum(self.b_sigma_k, axis=[-1,-2]) 
+        #         + tf.reduce_sum(self.b_sigma0, axis=[-1,-2]) 
+        #         + tf.einsum('Bd, Bd -> B', self.b_mu_k, self.b_mu_k)
+        #         + tf.einsum('Bd, Bd -> B', self.b_mu0, self.b_mu0)
+        #         - 2 * tf.einsum('Bd, Bd -> B', self.b_mu_k, self.b_mu0))) 
+
+        kl1 = tf.reduce_sum(w_z0_kl_loss)
+        kl2 = tf.reduce_sum(w_tau_k_kl_loss)
+        kl3 = tf.reduce_sum(b_z0_kl_loss)
+        kl4 = tf.reduce_sum(b_tau_k_kl_loss) 
+        kl5 = tf.reduce_sum(w_z_k_log_prob)
+        kl6 = tf.reduce_sum(b_z_k_log_prob)
+
+        kl7 = tf.reduce_sum(w_z_k_kl_loss)
+        kl8 = tf.reduce_sum(b_z_k_kl_loss)
+
+        kl_losses = (kl1 + kl2 + kl3 + kl4 + kl5 + kl6)
+
+        # MAKE SURE TO TRN THIS BACK ON!!!!!!!
+        # MAKE SURE TO TRN THIS BACK ON!!!!!!!
+        # MAKE SURE TO TRN THIS BACK ON!!!!!!!
+        # MAKE SURE TO TRN THIS BACK ON!!!!!!!
+        # MAKE SURE TO TRN THIS BACK ON!!!!!!!
+        #self.add_loss(kl_losses)
 
         # TODO: sample w0_mu etc. and pass into compute KL, then compute KL of w0_mu with its prior
         # Well I guess im still not certain about whether it is the KL or the log prob,
@@ -334,6 +410,8 @@ class MyMultilevelDense(tf.keras.layers.Layer):
 
         if self.activation is not None:
             outputs = self.activation(outputs)
+
+        #ipdb.set_trace()
 
         return outputs
 

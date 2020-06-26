@@ -142,8 +142,8 @@ class BaseModel(tf.keras.Model):
                         for name, weight in zip(names, weights):
                             tf.summary.histogram(name+'/weight', weight, step=global_step)
 
-                        for name, grad in zip(names, grads):
-                            tf.summary.histogram(name+'/grad', grad, step=global_step)
+                        #for name, grad in zip(names, grads):
+                        #    tf.summary.histogram(name+'/grad', grad, step=global_step)
 
                         # for i in range(3):
                         #     tf.summary.scalar('dense/w_mu{}'.format(i), self.get_weights()[0][i,0,0], step=step)
