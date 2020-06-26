@@ -70,6 +70,9 @@ class MyDense(tf.keras.layers.Layer):
 
 
 class MyMultilevelDense(tf.keras.layers.Layer):
+    """
+
+    """
 
     def __init__(self, units, num_groups,
                  multilevel_weights=True, multilevel_bias=True,
@@ -105,61 +108,157 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Initialization schemes
         # Set priors on variances to be -5 since softplus(-5+c)=0.0008
 
-        self.w_mu = self.add_weight(
+        # Variational parameters for z_k, the group latent variables
+        # Mean of the variational posterior for group latents
+        self.w_mu_k = self.add_weight(
             shape=(self.num_groups, self.units, last_dim),
             initializer='random_normal',
             trainable=True,
-            name='kernel_mu')
-        self.w_sigma = self.add_weight(
+            name='w_mu_k')
+        # Variance of the variational posterior for group latents
+        self.w_sigma_k = self.add_weight(
             shape=(self.num_groups, self.units, last_dim),
             initializer=tf.constant_initializer(-8),
             #initializer=tf.constant_initializer(1e-4),
             trainable=True,
-            name='kernel_sigma')
+            name='w_sigma_k')
 
-        # Mean of the prior on the means of each entry of weight matrix
-        self.w0_mu = self.add_weight(
+        # Variational parameters for z_0, the mean of the hierarchical prior
+        # Mean of the variational posterior for group prior z_0 
+        self.w_mu0 = self.add_weight(
             shape=(self.units, last_dim),
             initializer='random_normal',
             trainable=True,
-            name='kernel_prior_mu')
-        # Variance on the prior over the means on the of each entry of weight matrix
-        self.w0_sigma = self.add_weight(
+            name='w_mu0')
+        # Variance of the variational posterior for the group mean z_0
+        self.w_sigma0 = self.add_weight(
             shape=(self.units, last_dim),
             # Should be relatively diffuse, softplus(0+c)=1
             initializer=tf.constant_initializer(0.),
             #initializer=tf.constant_initializer(1e-4),
             #tf.constant_initializer(100.)
             trainable=True,
-            name='kernel_prior_sigma')
+            name='w_sigma0')
 
-        # TODO: add prior for w_sigma
+        # TODO: create variational params for tau_k
+        # Variational parameters for tau_k, the group variance of the hierarchical prior
+        # Mean of the variational posterior for group prior variance tau_k 
+        self.w_tau_k_mu = self.add_weight(
+            shape=(self.units, last_dim),
+            initializer='random_normal',
+            trainable=True,
+            name='w_tau_k_mu')
+        # Variance of the variational posterior for the group prior variance tau_k
+        self.w_tau_k_sigma = self.add_weight(
+            shape=(self.units, last_dim),
+            # Should be relatively diffuse, softplus(0+c)=1
+            initializer=tf.constant_initializer(1e-4),
+            #tf.constant_initializer(100.)
+            trainable=True,
+            name='w_tau_k_sigma')
 
-        self.b_mu = self.add_weight(
+        # # Fixed parameters for hyperprior over z_0 ~ N(0, v^-1)
+        # # Fixed mean of 0
+        # self.w_z0_prior_mean = self.add_weight(
+        #     shape=(self.units, last_dim),
+        #     initializer=tf.constant_initializer(0.),
+        #     trainable=False,
+        #     name='w_z0_prior_mean')
+        # # Fixed variance
+        # self.w_z0_prior_variance = self.add_weight(
+        #     shape=(self.units, last_dim),
+        #     initializer=tf.constant_initializer(10.),
+        #     trainable=False,
+        #     name='w_z0_prior_mean')
+
+        # # Fixed parameters for hyperprior over tau_k ~ N(0, tau_0)
+        # # Note that this value is unbounded because we can square later
+        # # Fixed mean of 0
+        # self.w_tau_k_prior_mean = self.add_weight(
+        #     shape=(self.num_groups,),
+        #     initializer=tf.constant_initializer(0.),
+        #     trainable=False,
+        #     name='w_tau_k_prior_mean')
+        # # Fixed hyperprior over tau_k, aka tau_0
+        # self.w_tau_k_prior_variance = self.add_weight(
+        #     shape=(self.num_groups,),
+        #     initializer=tf.constant_initializer(10.),
+        #     trainable=False,
+        #     name='w_tau_k_prior_variance')
+                # Fixed parameters for hyperprior over z_0 ~ N(0, v^-1)
+        # Fixed mean of 0
+        self.w_z0_prior_mean = 0.
+        # Fixed variance
+        self.w_z0_prior_variance = 10.
+
+        # Fixed parameters for hyperprior over tau_k ~ N(0, tau_0)
+        # Note that this value is unbounded because we can square later
+        # Fixed mean of 0
+        self.w_tau_k_prior_mean = 0.
+        # Fixed hyperprior over tau_k, aka tau_0
+        self.w_tau_k_prior_variance = 10.
+
+
+
+
+                # Variational parameters for z_k, the group latent variables
+        # Mean of the variational posterior for group latents
+        self.b_mu_k = self.add_weight(
             shape=(self.num_groups, self.units),
             initializer='random_normal',
             trainable=True,
-            name='bias_mu')
-        self.b_sigma = self.add_weight(
+            name='b_mu_k')
+        # Variance of the variational posterior for group latents
+        self.b_sigma_k = self.add_weight(
             shape=(self.num_groups, self.units),
             initializer=tf.constant_initializer(-8),
+            #initializer=tf.constant_initializer(1e-4),
             trainable=True,
-            name='bias_sigma')
+            name='b_sigma_k')
 
-
-        self.b0_mu = self.add_weight(
+        # Variational parameters for z_0, the mean of the hierarchical prior
+        # Mean of the variational posterior for group prior z_0 
+        self.b_mu0 = self.add_weight(
             shape=(self.units,),
             initializer='random_normal',
             trainable=True,
-            name='bias_prior_mu')
-        # Variance on the prior over the means of biases
-        self.b0_sigma = self.add_weight(
+            name='b_mu0')
+        # Variance of the variational posterior for the group mean z_0
+        self.b_sigma0 = self.add_weight(
             shape=(self.units,),
+            # Should be relatively diffuse, softplus(0+c)=1
             initializer=tf.constant_initializer(0.),
+            #initializer=tf.constant_initializer(1e-4),
             trainable=True,
-            name='bias_prior_sigma')
+            name='b_sigma0')
 
-        # TODO: add prior for b_sigma
+        # Variational parameters for tau_k, the group variance of the hierarchical prior
+        # Mean of the variational posterior for group prior variance tau_k 
+        self.b_tau_k_mu = self.add_weight(
+            shape=(self.units,),
+            initializer='random_normal',
+            trainable=True,
+            name='b_tau_k_mu')
+        # Variance of the variational posterior for the group prior variance tau_k
+        self.b_tau_k_sigma = self.add_weight(
+            shape=(self.units,),
+            # Should be relatively diffuse, softplus(0+c)=1
+            initializer=tf.constant_initializer(1e-4),
+            #tf.constant_initializer(100.)
+            trainable=True,
+            name='b_tau_k_sigma')
+
+        self.b_z0_prior_mean = 0.
+        # Fixed variance
+        self.b_z0_prior_variance = 10.
+
+        # Fixed parameters for hyperprior over tau_k ~ N(0, tau_0)
+        # Note that this value is unbounded because we can square later
+        # Fixed mean of 0
+        self.b_tau_k_prior_mean = 0.
+        # Fixed hyperprior over tau_k, aka tau_0
+        self.b_tau_k_prior_variance = 10.
+
 
         super(MyMultilevelDense, self).build(input_shape)
 
@@ -195,16 +294,26 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         x, gid = inputs
 
         batch_size, num_features = x.shape
+        # Sanity checks
         assert len(x.shape) >= 2, "Data is incorrect shape!"
         assert len(gid.shape) == 1, "gid should be flat vector!"
 
+        w = self.sample_posterior(self.w_mu, self.w_sigma, gid)
+        b = self.sample_posterior(self.b_mu, self.b_sigma, gid)
+
+        z0_kl_loss = self.compute_kl(self.w0_mu, self.w0_sigma, self.z0_mean, self.z0_variance)
+        z0_kl_loss = self.compute_kl(self.w0_mu, self.w0_sigma, self.z0_mean, self.z0_variance)
+
+        # TODO: sample w0_mu etc. and pass into compute KL, then compute KL of w0_mu with its prior
+        # Well I guess im still not certain about whether it is the KL or the log prob,
+        # I guess I'll just try both. But yeah sample z_0 and tau_k from q(w0_mu, w0_sigma) and 
+        # q(tau_k_mu, tau_k_sigma)
 
         #w_kl_loss = self.compute_kl(self.w_mu, self.w_sigma, self.w0_mu, self.w0_sigma, gid)
         #b_kl_loss = self.compute_kl(self.b_mu, self.b_sigma, self.b0_mu, self.b0_sigma, gid)
         #self.add_loss(tf.reduce_sum(w_kl_loss) + tf.reduce_sum(b_kl_loss))
 
-        w = self.sample_posterior(self.w_mu, self.w_sigma, gid)
-        b = self.sample_posterior(self.b_mu, self.b_sigma, gid)
+        
 
         # B: batch size, p: num_features, u: num_units
         einsum_matrix_mult = '{},Bp->Bu'.format(
@@ -213,6 +322,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         #print(w.shape, x.shape)
         outputs = tf.einsum(einsum_matrix_mult, w, x)
 
+        # Sanity checks
         target_shape = (batch_size, self.units)
         msg = "output is shape {}, when should be shape {}".format(outputs.shape, target_shape)
         assert outputs.shape == target_shape, msg
