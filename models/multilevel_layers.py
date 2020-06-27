@@ -136,7 +136,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         self.w_sigma0 = self.add_weight(
             shape=(self.units, last_dim),
             # Should be relatively diffuse, softplus(0+c)=1
-            initializer=tf.constant_initializer(0.),
+            initializer=tf.constant_initializer(-8.),
             #initializer=tf.constant_initializer(1e-4),
             #tf.constant_initializer(100.)
             trainable=True,
@@ -146,15 +146,15 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Variational parameters for tau_k, the group variance of the hierarchical prior
         # Mean of the variational posterior for group prior variance tau_k 
         self.w_tau_k_mu = self.add_weight(
-            shape=(self.num_groups, self.units, last_dim),
-            initializer='random_normal',
+            shape=(self.num_groups,),
+            initializer=tf.constant_initializer(2),
             trainable=True,
             name='w_tau_k_mu')
         # Variance of the variational posterior for the group prior variance tau_k
         self.w_tau_k_sigma = self.add_weight(
-            shape=(self.num_groups, self.units, last_dim),
+            shape=(self.num_groups,),
             # Should be relatively diffuse, softplus(0+c)=1
-            initializer=tf.constant_initializer(1e-4),
+            initializer=tf.constant_initializer(-8),
             #tf.constant_initializer(100.)
             trainable=True,
             name='w_tau_k_sigma')
@@ -237,15 +237,15 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Variational parameters for tau_k, the group variance of the hierarchical prior
         # Mean of the variational posterior for group prior variance tau_k 
         self.b_tau_k_mu = self.add_weight(
-            shape=(self.num_groups, self.units,),
-            initializer='random_normal',
+            shape=(self.num_groups,),
+            initializer=tf.constant_initializer(2),
             trainable=True,
             name='b_tau_k_mu')
         # Variance of the variational posterior for the group prior variance tau_k
         self.b_tau_k_sigma = self.add_weight(
-            shape=(self.num_groups, self.units,),
+            shape=(self.num_groups,),
             # Should be relatively diffuse, softplus(0+c)=1
-            initializer=tf.constant_initializer(1e-4),
+            initializer=tf.constant_initializer(-8),
             #tf.constant_initializer(100.)
             trainable=True,
             name='b_tau_k_sigma')
@@ -272,6 +272,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
 
 
     def compute_kl(self, mu1, sigma1, mu2, sigma2):
+        ipdb.set_trace()
         kl = (
             tf.math.log(sigma2/sigma1)
             + (sigma1**2 + (mu1-mu2)**2)/(2*sigma2**2)
@@ -367,17 +368,29 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         kl4 = tf.reduce_sum(b_tau_k_kl_loss) 
         kl5 = tf.reduce_sum(w_z_k_log_prob)
         kl6 = tf.reduce_sum(b_z_k_log_prob)
+        
 
+        # don't add these, these are the other versions
         kl7 = tf.reduce_sum(w_z_k_kl_loss)
         kl8 = tf.reduce_sum(b_z_k_kl_loss)
 
-        kl_losses = (kl1 + kl2 + kl3 + kl4 + kl5 + kl6)
+        kls = [kl1, kl2, kl3, kl4, kl5, kl6, kl7, kl8]
+
+        kl_losses = (kl1 + kl2 + kl3 + kl4 - kl5 - kl6)
+
+        self.add_loss(kl1)
+        self.add_loss(kl2)
+        self.add_loss(kl3)
+        self.add_loss(kl4)
+        self.add_loss(-1*kl5)
+        self.add_loss(-1*kl6)
 
         # MAKE SURE TO TRN THIS BACK ON!!!!!!!
         # MAKE SURE TO TRN THIS BACK ON!!!!!!!
         # MAKE SURE TO TRN THIS BACK ON!!!!!!!
         # MAKE SURE TO TRN THIS BACK ON!!!!!!!
         # MAKE SURE TO TRN THIS BACK ON!!!!!!!
+        #self.add_loss(kls)
         #self.add_loss(kl_losses)
 
         # TODO: sample w0_mu etc. and pass into compute KL, then compute KL of w0_mu with its prior
@@ -411,7 +424,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         if self.activation is not None:
             outputs = self.activation(outputs)
 
-        #ipdb.set_trace()
+        ipdb.set_trace()
 
         return outputs
 
