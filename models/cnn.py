@@ -731,7 +731,13 @@ class MyLatentWeightCNN(BaseModel):
         self.flatten = Flatten()
         #self.layer1 = Dense(units=params[4], activation='relu')
         self.layer1 = Dense(units=128, activation='relu')
-        self.ml_dense = MyMultilevelDense(units=62, num_groups=self.num_groups[0], activation='softmax')
+
+        group_kl_weights = (1. / np.array(self.group_train_sizes)).astype(np.float32)
+        self.ml_dense = MyMultilevelDense(
+            units=62, 
+            num_groups=self.num_groups[0], 
+            group_kl_weights=group_kl_weights,
+            activation='softmax')
         #self.ml_dense = Dense(units=62, activation='softmax')
 
     def call(self, x, gid):

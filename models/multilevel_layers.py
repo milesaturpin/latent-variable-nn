@@ -81,6 +81,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
                  #fixed_prior=True,
                  kl_weight=None,
                  kl_use_exact=False,
+                 group_kl_weights=1.,
                  activation=None,
                  use_bias=True,
                  **kwargs):
@@ -91,6 +92,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         self.num_groups = num_groups
         self.multilevel_weights = multilevel_weights
         self.multilevel_bias = multilevel_bias
+        self.group_kl_weights = group_kl_weights
         #self.fixed_prior = fixed_prior
         self.use_bias = use_bias
         self.activation = tf.keras.activations.get(activation)
@@ -198,7 +200,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Fixed mean of 0
         self.w_tau_k_prior_mean = 0.
         # Fixed hyperprior over tau_k, aka tau_0
-        self.w_tau_k_prior_variance = 10.
+        self.w_tau_k_prior_variance = 100.
 
 
 
@@ -229,7 +231,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         self.b_sigma0 = self.add_weight(
             shape=(self.units,),
             # Should be relatively diffuse, softplus(0+c)=1
-            initializer=tf.constant_initializer(0.),
+            initializer=tf.constant_initializer(-4.),
             #initializer=tf.constant_initializer(1e-4),
             trainable=True,
             name='b_sigma0')
@@ -259,20 +261,26 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Fixed mean of 0
         self.b_tau_k_prior_mean = 0.
         # Fixed hyperprior over tau_k, aka tau_0
-        self.b_tau_k_prior_variance = 10.
+        self.b_tau_k_prior_variance = 100.
 
 
         super(MyMultilevelDense, self).build(input_shape)
 
+    @tf.function
     def sample_posterior(self, mu, sigma):
         # By sampling after gather, I use different noise for each sample
         eps = np.random.randn(*mu.shape)
         samp = mu + sigma*eps
         return samp
 
-
+    @tf.function
     def compute_kl(self, mu1, sigma1, mu2, sigma2):
-        ipdb.set_trace()
+
+        # # Hack to fix broadcasting failure e.g. divide [5]/[5,62,128]
+        # dim_diff = len(sigma1.shape) - len(sigma2.shape)
+        # for _ in range(dim_diff):
+        #     sigma2 = tf.expand_dims(sigma2, axis=[-1])
+
         kl = (
             tf.math.log(sigma2/sigma1)
             + (sigma1**2 + (mu1-mu2)**2)/(2*sigma2**2)
@@ -281,7 +289,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         return kl
 
 
-
+    
     def call(self, inputs):
         x, gid = inputs
 
@@ -319,7 +327,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         b_z0_kl_loss = self.compute_kl(
             self.b_mu0, b_sigma0_sftpls, self.b_z0_prior_mean, self.b_z0_prior_variance)
 
-        # TODO: figure out scaling
+
         # KL between var post on tau_k and fixed prior over tau_k
         w_tau_k_kl_loss = self.compute_kl(
             gather(self.w_tau_k_mu), gather(w_tau_k_sigma_sftpls),
@@ -328,39 +336,99 @@ class MyMultilevelDense(tf.keras.layers.Layer):
             gather(self.b_tau_k_mu), gather(b_tau_k_sigma_sftpls), 
             self.b_tau_k_prior_mean, self.b_tau_k_prior_variance)
 
-        # TODO: figure out scaling
+
         # TODO: pick version
         # Version 1: taking the KL between q(z_k) and p(z_k), have to sample 
         # the parameters of p(z_k|z_0, tau_k) from q(z_0, tau_k)
-        w_z_k_kl_loss = self.compute_kl(gather(self.w_mu_k), gather(w_sigma_k_sftpls), w0, w_tau_k_sq)
-        b_z_k_kl_loss = self.compute_kl(gather(self.b_mu_k), gather(b_sigma_k_sftpls), b0, b_tau_k_sq)
+        w_z_k_kl_loss = self.compute_kl(gather(self.w_mu_k), gather(w_sigma_k_sftpls), w0, 
+            tf.expand_dims(tf.expand_dims(w_tau_k_sq, axis=[-1]), axis=[-1])
+            )
+        b_z_k_kl_loss = self.compute_kl(gather(self.b_mu_k), gather(b_sigma_k_sftpls), b0, 
+            tf.expand_dims(b_tau_k_sq, axis=[-1]))
 
         # Version 2: take the expected log prob of z_k wrt q.
         #   Version 2a: do just a monte carlo estimate
-        w_z_k_log_prob = tfd.Normal(w0, w_tau_k_sq).log_prob(w)
-        b_z_k_log_prob = tfd.Normal(b0, b_tau_k_sq).log_prob(b)
+        w_z_k_log_prob = tfd.Normal(w0, 
+            tf.expand_dims(tf.expand_dims(w_tau_k_sq, axis=[-1]), axis=[-1])
+            ).log_prob(w)
+        b_z_k_log_prob = tfd.Normal(b0, 
+            tf.expand_dims(b_tau_k_sq, axis=[-1])
+            ).log_prob(b)
         #   Version 2b: do mix of closed form and monte carlo
+        #import ipdb; ipdb.set_trace()
+        D = self.w_mu_k.shape[1] * self.w_mu_k.shape[2]
+        w_z_k_log_prob = tf.squeeze(
+            -1/2 * D * np.log(2*np.pi) 
+            - 1/2 * D * tf.math.log(w_tau_k_sq)
+            - 1/2/w_tau_k_sq * (
+                tf.reduce_sum(gather(w_sigma_k_sftpls), axis=[-1,-2]) 
+                + tf.reduce_sum(w_sigma0_sftpls, axis=[-1,-2]) 
+                + tf.einsum('Bij, Bij -> ', gather(self.w_mu_k), gather(self.w_mu_k))
+                + tf.einsum('ij, ij -> ', self.w_mu0, self.w_mu0)
+                - 2 * tf.einsum('Bij, ij -> ', gather(self.w_mu_k), 
+                    self.w_mu0)))
 
-        # D = self.w_mu_k.shape[1] * self.w_mu_k.shape[2]
-        # w_z_k_log_prob = (
-        #     -1/2 * D * np.log(2*np.pi) 
-        #     - 1/2 * D * tf.math.log(w_tau_k_sq)
-        #     - 1/2/w_tau_k_sq * (
-        #         tf.reduce_sum(self.w_sigma_k, axis=[-1,-2]) 
-        #         + tf.reduce_sum(self.w_sigma0, axis=[-1,-2]) 
-        #         + tf.einsum('Bd, Bd -> B', self.w_mu_k, self.w_mu_k)
-        #         + tf.einsum('Bd, Bd -> B', self.w_mu0, self.w_mu0)
-        #         - 2 * tf.einsum('Bd, Bd -> B', self.w_mu_k, self.w_mu0)))
+        D = self.b_mu_k.shape[1]
+        b_z_k_log_prob = tf.squeeze(
+            -1/2 * D * np.log(2*np.pi) 
+            - 1/2 * D * tf.math.log(b_tau_k_sq)
+            - 1/2/b_tau_k_sq * (
+                tf.reduce_sum(gather(b_sigma_k_sftpls), axis=[-1]) 
+                + tf.reduce_sum(b_sigma0_sftpls, axis=[-1]) 
+                + tf.einsum('Bi, Bi -> ', gather(self.b_mu_k), gather(self.b_mu_k))
+                + tf.einsum('i, i -> ', self.b_mu0, self.b_mu0)
+                - 2 * tf.einsum('Bi, i -> ', gather(self.b_mu_k), self.b_mu0))) 
 
-        # b_z_k_log_prob = (
-        #     -1/2 * D * np.log(2*np.pi) 
-        #     - 1/2 * D * tf.math.log(b_tau_k_sq)
-        #     - 1/2/b_tau_k_sq * (
-        #         tf.reduce_sum(self.b_sigma_k, axis=[-1,-2]) 
-        #         + tf.reduce_sum(self.b_sigma0, axis=[-1,-2]) 
-        #         + tf.einsum('Bd, Bd -> B', self.b_mu_k, self.b_mu_k)
-        #         + tf.einsum('Bd, Bd -> B', self.b_mu0, self.b_mu0)
-        #         - 2 * tf.einsum('Bd, Bd -> B', self.b_mu_k, self.b_mu0))) 
+        #import ipdb; ipdb.set_trace()
+
+        # Scale kl losses
+        # VERSION 1
+
+        #import ipdb; ipdb.set_trace()
+
+        group_kl_weights = gather(self.group_kl_weights)
+        group_kl_weights1 = tf.expand_dims(tf.expand_dims(group_kl_weights, axis=[-1]), axis=[-1])
+        group_kl_weights2 = tf.expand_dims(group_kl_weights, axis=[-1])
+        # Take inverse then sum to get train size
+        train_size = tf.reduce_sum(1. / self.group_kl_weights)
+        prior_kl_weight = 1. / train_size
+
+        #w_z_k_log_prob = tf.math.multiply(b_z_k_log_prob,tf.expand_dims(tf.expand_dims(group_kl_weights, axis=[-1]), axis=[-1]))
+
+        w_z0_kl_loss = tf.math.multiply(w_z0_kl_loss, prior_kl_weight)
+        b_z0_kl_loss = tf.math.multiply(b_z0_kl_loss, prior_kl_weight)
+        # adding squeeze for lin reg case
+
+        from string import ascii_letters
+
+        # e.g. get first three letters of alphabet
+        first_shape = ascii_letters[:len(tf.squeeze(w_z_k_log_prob).shape)]
+        w_z_k_log_prob = tf.einsum('{}, a ->{}'.format(first_shape, first_shape), 
+            tf.squeeze(w_z_k_log_prob), group_kl_weights)
+        first_shape = ascii_letters[:len(tf.squeeze(b_z_k_log_prob).shape)]
+        b_z_k_log_prob = tf.einsum('{}, a ->{}'.format(first_shape, first_shape), 
+            tf.squeeze(b_z_k_log_prob), group_kl_weights)
+        #w_z_k_log_prob = tf.math.multiply(tf.squeeze(w_z_k_log_prob), group_kl_weights1)
+        #b_z_k_log_prob = tf.math.multiply(tf.squeeze(b_z_k_log_prob), group_kl_weights2)
+        # Weird broadcasting thing happening so make these group_kl_weights 
+        # instead of group_kl_weights1
+        w_tau_k_kl_loss = tf.math.multiply(w_tau_k_kl_loss, group_kl_weights)
+        b_tau_k_kl_loss = tf.math.multiply(b_tau_k_kl_loss, group_kl_weights)
+
+        # scale kl VERSION 2 TODO: I actually need to change the above KL computations too,
+        # like for z_k and tau_k I won't actually do gather
+        # scale_kl = lambda x: tf.math.multiply(x, prior_kl_weight)
+        # w_z0_kl_loss = scale_kl(w_z0_kl_loss)
+        # b_z0_kl_loss = scale_kl(b_z0_kl_loss)
+        # w_z_k_log_prob = scale_kl(w_z_k_log_prob)
+        # b_z_k_log_prob = scale_kl(b_z_k_log_prob)
+        # w_tau_k_kl_loss = scale_kl(w_tau_k_kl_loss)
+        # b_tau_k_kl_loss = scale_kl(b_tau_k_kl_loss)
+
+
+        # TODO: scale KL VERSION 3, interpolate bt 1 and 2
+
+        
 
         kl1 = tf.reduce_sum(w_z0_kl_loss)
         kl2 = tf.reduce_sum(w_tau_k_kl_loss)
@@ -369,8 +437,10 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         kl5 = tf.reduce_sum(w_z_k_log_prob)
         kl6 = tf.reduce_sum(b_z_k_log_prob)
         
-
+        #import ipdb; ipdb.set_trace()
         # don't add these, these are the other versions
+        w_z_k_kl_loss = tf.math.multiply(w_z_k_kl_loss, group_kl_weights1)
+        b_z_k_kl_loss = tf.math.multiply(b_z_k_kl_loss, group_kl_weights2)
         kl7 = tf.reduce_sum(w_z_k_kl_loss)
         kl8 = tf.reduce_sum(b_z_k_kl_loss)
 
@@ -382,8 +452,10 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         self.add_loss(kl2)
         self.add_loss(kl3)
         self.add_loss(kl4)
-        self.add_loss(-1*kl5)
-        self.add_loss(-1*kl6)
+        #self.add_loss(-1*kl5)
+        #self.add_loss(-1*kl6)
+        self.add_loss(kl7)
+        self.add_loss(kl8)
 
         # MAKE SURE TO TRN THIS BACK ON!!!!!!!
         # MAKE SURE TO TRN THIS BACK ON!!!!!!!
@@ -424,7 +496,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         if self.activation is not None:
             outputs = self.activation(outputs)
 
-        ipdb.set_trace()
+        #.set_trace()
 
         return outputs
 

@@ -6,6 +6,7 @@ import os
 from argparse import ArgumentParser
 import tensorflow as tf
 from sklearn.utils import shuffle
+from collections import Counter
 
 from models.cnn import NormalCNN, LatentFactorCNN, DoubleLatentCNN, LatentBiasCNN, LowerLatentFactorCNN, LatentWeightCNN, LatentFactorCNN2, LatentWeightOnlyCNN, OneHotCNN, MyLatentWeightCNN, MAPFullMultilevelCNN, MAPFactoredMultilevelCNN
 from models.baselines import MLP, OneHotMLP, MultilevelMLP, FactoredMultilevelMLP
@@ -210,8 +211,9 @@ def main():
     else:
         lr = args.lr
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-    #optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
+    #optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+    # clipvalue=2.
+    optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr, )
     #import tensorflow_addons as tfa
     #optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
     #optimizer = tf.keras.optimizers.SGD(learning_rate=args.lr)
@@ -233,13 +235,6 @@ def main():
         print('>>> Reading FEMNIST...')
         train_data, test_data = read_femnist_data(
             args.data_dir, args.data_size, args.seed)
-        # TODO: should be a cleaner way to get number of unique groups
-        gid_train = train_data[1]
-        # num_groups should be provided as an array-like, even if only one elt
-        num_groups = (len(np.unique(gid_train)),)
-        train_size = gid_train.shape[0]
-        kwargs['train_size'] = train_size
-        kwargs['num_groups'] = num_groups
 
         model_dict = {
             'none' : NormalCNN,
@@ -257,8 +252,6 @@ def main():
             'map-full' : MAPFullMultilevelCNN,
             'map-factored' : MAPFactoredMultilevelCNN
         }
-
-        model = model_dict[args.latent_config](**kwargs)
 
     else:
         print('>>> Reading Shakespeare (not literally)...')
@@ -282,6 +275,21 @@ def main():
         #     model = LatentBiasLSTM(**kwargs)
         else:
             raise ValueError('No matching latent variable configuration')
+
+    # TODO: should be a cleaner way to get number of unique groups
+    _, gid_train, _ = train_data
+    # num_groups should be provided as an array-like, even if only one elt
+    num_groups = (len(np.unique(gid_train)),)
+    train_size = gid_train.shape[0]
+    kwargs['train_size'] = train_size
+    kwargs['num_groups'] = num_groups
+
+    # Used later for KL scaling, group_train_sizes[i] gives 
+    # number of datapoints for group i
+    count_dict = Counter(gid_train)
+    kwargs['group_train_sizes'] = [count_dict[i] for i in range(num_groups[0])]
+
+    model = model_dict[args.latent_config](**kwargs)
 
     model.train(train_data, test_data, args.batch_size, args.num_epochs, args.eval_every, args.print_freq)
 
