@@ -122,7 +122,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Variance of the variational posterior for group latents
         self.w_sigma_k = self.add_weight(
             shape=(self.num_groups, self.units, last_dim),
-            initializer=tf.constant_initializer(-8),
+            initializer=tf.constant_initializer(-4.),
             #initializer=tf.constant_initializer(1e-4),
             trainable=True,
             name='w_sigma_k')
@@ -131,14 +131,14 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Mean of the variational posterior for group prior z_0 
         self.w_mu0 = self.add_weight(
             shape=(self.units, last_dim),
-            initializer='random_normal',
+            initializer='zeros',
             trainable=True,
             name='w_mu0')
         # Variance of the variational posterior for the group mean z_0
         self.w_sigma0 = self.add_weight(
             shape=(self.units, last_dim),
             # Should be relatively diffuse, softplus(0+c)=1
-            initializer=tf.constant_initializer(-8.),
+            initializer=tf.constant_initializer(-4.),
             #initializer=tf.constant_initializer(1e-4),
             #tf.constant_initializer(100.)
             trainable=True,
@@ -149,14 +149,14 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Mean of the variational posterior for group prior variance tau_k 
         self.w_tau_k_mu = self.add_weight(
             shape=(self.num_groups,),
-            initializer=tf.constant_initializer(2),
+            initializer=tf.constant_initializer(-1),
             trainable=True,
             name='w_tau_k_mu')
         # Variance of the variational posterior for the group prior variance tau_k
         self.w_tau_k_sigma = self.add_weight(
             shape=(self.num_groups,),
             # Should be relatively diffuse, softplus(0+c)=1
-            initializer=tf.constant_initializer(-8),
+            initializer=tf.constant_initializer(-2),
             #tf.constant_initializer(100.)
             trainable=True,
             name='w_tau_k_sigma')
@@ -193,7 +193,7 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Fixed mean of 0
         self.w_z0_prior_mean = 0.
         # Fixed variance
-        self.w_z0_prior_variance = 10.
+        self.w_z0_prior_variance = 100
 
         # Fixed parameters for hyperprior over tau_k ~ N(0, tau_0)
         # Note that this value is unbounded because we can square later
@@ -209,13 +209,13 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Mean of the variational posterior for group latents
         self.b_mu_k = self.add_weight(
             shape=(self.num_groups, self.units),
-            initializer='random_normal',
+            initializer='zeros',
             trainable=True,
             name='b_mu_k')
         # Variance of the variational posterior for group latents
         self.b_sigma_k = self.add_weight(
             shape=(self.num_groups, self.units),
-            initializer=tf.constant_initializer(-8),
+            initializer=tf.constant_initializer(-4),
             #initializer=tf.constant_initializer(1e-4),
             trainable=True,
             name='b_sigma_k')
@@ -240,28 +240,28 @@ class MyMultilevelDense(tf.keras.layers.Layer):
         # Mean of the variational posterior for group prior variance tau_k 
         self.b_tau_k_mu = self.add_weight(
             shape=(self.num_groups,),
-            initializer=tf.constant_initializer(2),
+            initializer=tf.constant_initializer(-1),
             trainable=True,
             name='b_tau_k_mu')
         # Variance of the variational posterior for the group prior variance tau_k
         self.b_tau_k_sigma = self.add_weight(
             shape=(self.num_groups,),
             # Should be relatively diffuse, softplus(0+c)=1
-            initializer=tf.constant_initializer(-8),
+            initializer=tf.constant_initializer(-2),
             #tf.constant_initializer(100.)
             trainable=True,
             name='b_tau_k_sigma')
 
         self.b_z0_prior_mean = 0.
         # Fixed variance
-        self.b_z0_prior_variance = 10.
+        self.b_z0_prior_variance = 100
 
         # Fixed parameters for hyperprior over tau_k ~ N(0, tau_0)
         # Note that this value is unbounded because we can square later
         # Fixed mean of 0
         self.b_tau_k_prior_mean = 0.
         # Fixed hyperprior over tau_k, aka tau_0
-        self.b_tau_k_prior_variance = 100.
+        self.b_tau_k_prior_variance = 1e5
 
 
         super(MyMultilevelDense, self).build(input_shape)
@@ -293,6 +293,8 @@ class MyMultilevelDense(tf.keras.layers.Layer):
     def call(self, inputs):
         x, gid = inputs
 
+        #import ipdb; ipdb.set_trace()
+
         batch_size, num_features = x.shape
         # Sanity checks
         assert len(x.shape) >= 2, "Data is incorrect shape!"
@@ -300,12 +302,13 @@ class MyMultilevelDense(tf.keras.layers.Layer):
 
         # Get a softplussed version of the variances
         c = np.log(np.expm1(1.))
-        w_sigma_k_sftpls = tf.nn.softplus(c + self.w_sigma_k)
-        b_sigma_k_sftpls = tf.nn.softplus(c + self.b_sigma_k)
-        w_sigma0_sftpls = tf.nn.softplus(c + self.w_sigma0)
-        b_sigma0_sftpls = tf.nn.softplus(c + self.b_sigma0)
-        w_tau_k_sigma_sftpls = tf.nn.softplus(c + self.w_tau_k_sigma)
-        b_tau_k_sigma_sftpls = tf.nn.softplus(c + self.b_tau_k_sigma)
+        var_activation = tf.math.exp
+        w_sigma_k_sftpls = var_activation(c + self.w_sigma_k)
+        b_sigma_k_sftpls = var_activation(c + self.b_sigma_k)
+        w_sigma0_sftpls = var_activation(c + self.w_sigma0)
+        b_sigma0_sftpls = var_activation(c + self.b_sigma0)
+        w_tau_k_sigma_sftpls = var_activation(c + self.w_tau_k_sigma)
+        b_tau_k_sigma_sftpls = var_activation(c + self.b_tau_k_sigma)
 
         gather = lambda x: tf.gather(x, gid)
 
@@ -448,10 +451,10 @@ class MyMultilevelDense(tf.keras.layers.Layer):
 
         kl_losses = (kl1 + kl2 + kl3 + kl4 - kl5 - kl6)
 
-        self.add_loss(kl1)
-        self.add_loss(kl2)
-        self.add_loss(kl3)
-        self.add_loss(kl4)
+        #self.add_loss(kl1)
+        #self.add_loss(kl2)
+        #self.add_loss(kl3)
+        #self.add_loss(kl4)
         #self.add_loss(-1*kl5)
         #self.add_loss(-1*kl6)
         self.add_loss(kl7)
