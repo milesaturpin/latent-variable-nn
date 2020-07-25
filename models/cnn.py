@@ -12,7 +12,7 @@ from models.model_utils import (
     init_mean_field_vectors, build_normal_variational_posterior,
     latent_normal_matrix, latent_matrix_variational_posterior, softplus_inverse)
 
-from models.multilevel_layers import MyMultilevelDense, MAPMultilevelDense, MAPFactoredMultilevelDense
+from models.multilevel_layers import MyMultilevelDense, MyHierarchicalDense, MAPMultilevelDense, MAPFactoredMultilevelDense
 
 tfd = tfp.distributions
 tfpl = tfp.layers
@@ -732,14 +732,20 @@ class MyLatentWeightCNN(BaseModel):
         #self.layer1 = Dense(units=params[4], activation='relu')
         self.layer1 = Dense(units=128, activation='relu')
 
-        group_kl_weights = (1. / np.array(self.group_train_sizes)).astype(np.float32)
-        self.ml_dense = MyMultilevelDense(
+        #group_kl_weights = (1. / np.array(self.group_train_sizes)).astype(np.float32)
+        # self.ml_dense = MyMultilevelDense(
+        #     units=62, 
+        #     num_groups=self.num_groups[0], 
+        #     group_kl_weights=group_kl_weights,
+        #     activation='softmax')
+        self.hier_dense = MyHierarchicalDense(
             units=62, 
             num_groups=self.num_groups[0], 
-            group_kl_weights=group_kl_weights,
+            kl_weight=self.kl_weight,
             activation='softmax')
         #self.ml_dense = Dense(units=62, activation='softmax')
 
+    @tf.function
     def call(self, x, gid):
         x = self.reshape(x)
         x = self.conv1(x)
@@ -748,7 +754,7 @@ class MyLatentWeightCNN(BaseModel):
         x = self.pool2(x)
         x = self.flatten(x)
         x = self.layer1(x)
-        x = self.ml_dense([x,gid])
+        x = self.hier_dense([x,gid])
         return x
 
 

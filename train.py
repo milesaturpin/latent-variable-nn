@@ -150,6 +150,11 @@ def read_femnist_data(data_dir, data_size, seed):
     gid_test = load('gid_test.npy')
     y_test = load('y_test.npy')
 
+    y_train = y_train.astype(np.int32)
+    y_test = y_test.astype(np.int32)
+    gid_train = gid_train.astype(np.int32)
+    gid_test = gid_test.astype(np.int32)
+
     train_data = [x_train, gid_train, y_train]
     test_data = [x_test, gid_test, y_test]
 
@@ -214,6 +219,7 @@ def main():
     #optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     # clipvalue=2.
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr, )
+    #optimizer = tf.keras.optimizers.RMSprop(learning_rate=args.lr, )
     #import tensorflow_addons as tfa
     #optimizer = tfa.optimizers.LazyAdam(learning_rate=args.lr)
     #optimizer = tf.keras.optimizers.SGD(learning_rate=args.lr)
@@ -288,6 +294,9 @@ def main():
     # number of datapoints for group i
     count_dict = Counter(gid_train)
     kwargs['group_train_sizes'] = [count_dict[i] for i in range(num_groups[0])]
+
+    num_batches = np.ceil(train_size)/args.batch_size
+    kwargs['kl_weight'] = tf.convert_to_tensor(1/num_batches, dtype=tf.float32)
 
     model = model_dict[args.latent_config](**kwargs)
 

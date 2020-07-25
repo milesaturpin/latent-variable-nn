@@ -8,6 +8,7 @@ from tensorflow.keras.layers import (
 #from tensorflow_probability.layers import DenseVariational
 
 from models.base_model import BaseModel
+from models.multilevel_variables import HierarchicalVariableLayer
 from models.model_utils import (
     init_mean_field_vectors, build_normal_variational_posterior,
     latent_normal_matrix, latent_matrix_variational_posterior, softplus_inverse)
@@ -69,7 +70,83 @@ class MyDense(tf.keras.layers.Layer):
 
 
 
+class MyHierarchicalDense(tf.keras.layers.Layer):
 
+    def __init__(self, units, num_groups,
+                 multilevel_weights=True, 
+                 multilevel_bias=True,
+                 kl_weight=1.,
+                 activation=None,
+                 use_bias=True,
+                 **kwargs):
+        super(MyHierarchicalDense, self).__init__(**kwargs)
+        self.units = int(units)
+        self.num_groups = num_groups
+        self.multilevel_weights = multilevel_weights
+        self.multilevel_bias = multilevel_bias
+        self.kl_weight = kl_weight
+        self.activation = tf.keras.activations.get(activation)
+        self.use_bias = use_bias
+        #self.is_hierarchical = True
+#         self.input_spec = [
+#             tf.keras.layers.InputSpec(min_ndim=2),
+#             tf.keras.layers.InputSpec(ndim=1)]
+        
+    def build(self, input_shape):
+        x_input_shape, gid_input_shape = input_shape
+        last_dim = x_input_shape[-1]
+#         self.input_spec = [
+#             tf.keras.layers.InputSpec(min_ndim=2, axes={-1: last_dim}),
+#             tf.keras.layers.InputSpec(ndim=1)]
+        
+        self.w = HierarchicalVariableLayer(
+            variable_shape=[self.units, last_dim],
+            num_groups=self.num_groups, 
+            kl_weight=self.kl_weight,
+            name=self.name+'/kernel'
+            )
+        
+        #if self.multilevel_bias:
+        self.b = HierarchicalVariableLayer(
+            variable_shape=[self.units],
+            num_groups=self.num_groups, 
+            kl_weight=self.kl_weight,
+            name=self.name+'/bias'
+            )
+        
+        super(MyHierarchicalDense, self).build(input_shape)
+     
+    @tf.function
+    def call(self, inputs):
+        
+        x, gid = inputs
+        batch_size, num_features = x.shape
+        # Sanity checks
+        #assert len(x.shape) >= 2, "Data is incorrect shape!"
+        #assert len(gid.shape) == 1, "gid should be flat vector!"
+        
+        w = self.w(gid)
+        b = self.b(gid)
+            
+        # B: batch size, p: num_features, u: num_units
+        einsum_matrix_mult = '{},Bp->Bu'.format(
+            'Bup' if self.multilevel_weights else 'up')
+        outputs = tf.einsum(einsum_matrix_mult, w, x)
+
+        # Sanity checks
+        target_shape = (batch_size, self.units)
+        msg = "output is shape {}, when should be shape {}".format(outputs.shape, target_shape)
+        assert outputs.shape == target_shape, msg
+        assert len(outputs.shape) == 2, "Output is wrong shape!"
+
+        if self.use_bias:
+            #outputs = tf.nn.bias_add(outputs, b)
+            outputs = outputs + b
+
+        if self.activation is not None:
+            outputs = self.activation(outputs)
+
+        return outputs
 
 class MyMultilevelDense(tf.keras.layers.Layer):
     """

@@ -33,7 +33,7 @@ class BaseModel(tf.keras.Model):
         logger : logging object
     """
 
-    def __init__(self, optimizer, loss_fn, train_size, num_groups, group_train_sizes, args, experiment_dir, logger):
+    def __init__(self, optimizer, loss_fn, train_size, num_groups, group_train_sizes, kl_weight, args, experiment_dir, logger):
         super(BaseModel, self).__init__()
         self.optimizer = optimizer
         self.loss_fn = loss_fn
@@ -47,6 +47,7 @@ class BaseModel(tf.keras.Model):
         self.num_groups = num_groups
         self.group_train_sizes = group_train_sizes
         self.seed = args.seed
+        self.kl_weight = kl_weight
         self._build_model()
         if args.latent_config != 'none':
             self._build_latent_space()
@@ -95,21 +96,24 @@ class BaseModel(tf.keras.Model):
         #self.logger.info('Evaluating untrained model...')
         #self.log_group_test_performance(test_data, epoch=0) 
 
-        # TODO: find less hacky way to build model, get summary
-        inputs, _ = train_data[:-1], train_data[-1]
-        inputs = [x[:5] for x in inputs]
-        _ = self(*inputs)
-        _ = self.losses
-        # Try to print summary of param counts, won't work for some models
-        try:
-            self.summary(print_fn=self.logger.info)
-        except:
-            self.logger.info('Configuration not amenable to `summary`.')
+        ## TODO: find less hacky way to build model, get summary
+        #inputs, _ = train_data[:-1], train_data[-1]
+        #inputs = [x[:5] for x in inputs]
+        #_ = self(*inputs)
+        #_ = self.losses
+        ## Try to print summary of param counts, won't work for some models
+        #try:
+        #    self.summary(print_fn=self.logger.info)
+        #except:
+        #    self.logger.info('Configuration not amenable to `summary`.')
 
 
         # Stateful Keras object for keeping track of mean loss
         train_loss = tf.keras.metrics.Mean('train_loss')
         mean_kl_loss = tf.keras.metrics.Mean('kl_loss')
+
+        num_batches = np.ceil(len(train_data[0])/batch_size)
+        #self.kl_weight = 1/num_batches
 
         last_time = time.time()
         for epoch in range(1, num_epochs+1):
@@ -118,10 +122,18 @@ class BaseModel(tf.keras.Model):
             train_generator = self.create_batch_generator(train_data, batch_size)
 
             for step, batch in enumerate(train_generator):
-                num_batches = np.ceil(len(train_data[0])/batch_size)
+                
                 global_step = (epoch-1)*num_batches + step
+                kl_annealing_weight = tf.convert_to_tensor(
+                    min(1., (global_step/num_batches) / (num_epochs/2)), dtype=tf.float32)
 
-                loss, kl_loss, grads = self.train_step(batch, global_step, num_batches, epoch, num_epochs)
+                loss, kl_loss, grads = self.train_step(
+                    batch, 
+                    tf.convert_to_tensor(global_step, dtype=tf.int32), 
+                    tf.convert_to_tensor(num_batches, dtype=tf.int32), 
+                    tf.convert_to_tensor(epoch, dtype=tf.int32), 
+                    tf.convert_to_tensor(num_epochs, dtype=tf.int32), 
+                    kl_annealing_weight)
                 train_loss(loss)
                 mean_kl_loss(kl_loss)
 
@@ -167,14 +179,17 @@ class BaseModel(tf.keras.Model):
                 self.log_group_test_performance(test_data, epoch=epoch)
                 self.save_weights()
 
-
-    def train_step(self, batch, global_step, num_batches, epoch, num_epochs):
+    @tf.function
+    def train_step(self, batch, global_step, num_batches, epoch, num_epochs, kl_annealing_weight):
         """
         Idiomatic Tensorflow for making predictions and computing
         gradients.
         """
         inputs, labels = batch[:-1], batch[-1]
         with tf.GradientTape() as tape:
+            
+            #print(inputs[0])
+            #print(labels)
             pred = self(*inputs)
             loss = self.loss_fn(labels, pred)
             # Only need to add KL loss once per epoch
@@ -184,19 +199,20 @@ class BaseModel(tf.keras.Model):
             
 
             kl_loss = self.losses
-            if (epoch) % 2 == 0:
-                kl_annealing_weight = 1
-            else: 
-                kl_annealing_weight = (global_step/num_batches)-(epoch-1)
+            # if (epoch) % 2 == 0:
+            #     kl_annealing_weight = 1
+            # else: 
+            #     kl_annealing_weight = (global_step/num_batches)-(epoch-1)
             # Esssentially turning annealing off for now
-            kl_annealing_weight = 1.
-            #kl_annealing_weight = min(1., (global_step/num_batches) / (num_epochs/2))
+            #kl_annealing_weight = 1.
+            #import ipdb; ipdb.set_trace()
+            
 
-            with self.train_summary_writer.as_default():
-                tf_summ_kl = lambda name, kl: tf.summary.scalar(name, kl, step=global_step)
-                for i,kll in enumerate(kl_loss):
-                    tf_summ_kl(str(i), kll)
-                tf_summ_kl('KL annealing weight', kl_annealing_weight)
+            # with self.train_summary_writer.as_default():
+            #     tf_summ_kl = lambda name, kl: tf.summary.scalar(name, kl, step=global_step)
+            #     for i,kll in enumerate(kl_loss):
+            #         tf_summ_kl(str(i), kll)
+            #     tf_summ_kl('KL annealing weight', kl_annealing_weight)
 
             
             total_loss = loss + kl_annealing_weight * sum(kl_loss)
