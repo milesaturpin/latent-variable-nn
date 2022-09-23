@@ -18,7 +18,7 @@ opt-einsum==2.3.2
 pandas==0.25.0
 pprint==0.1
 prefetch-generator==1.0.1
-protobuf==3.9.0
+protobuf==3.18.3
 pyparsing==2.4.1.1
 python-dateutil==2.8.0
 pytz==2019.1
